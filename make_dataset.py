@@ -15,6 +15,16 @@ from image import *
 from model import CSRNet
 import torch
 
+#set the root to the Shanghai dataset you download
+root = '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset'
+
+#now generate the ShanghaiA's ground truth
+part_A_train = os.path.join(root,'part_A_final/train_data','images')
+part_A_test = os.path.join(root,'part_A_final/test_data','images')
+part_B_train = os.path.join(root,'part_B_final/train_data','images')
+part_B_test = os.path.join(root,'part_B_final/test_data','images')
+
+
 #this is borrowed from https://github.com/davideverona/deep-crowd-counting_crowdnet
 def gaussian_filter_density(gt):
     print(gt.shape)
@@ -42,15 +52,6 @@ def gaussian_filter_density(gt):
     print('done.')
     return density
 
-
-#set the root to the Shanghai dataset you download
-root = '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset'
-
-#now generate the ShanghaiA's ground truth
-part_A_train = os.path.join(root,'part_A_final/train_data','images')
-part_A_test = os.path.join(root,'part_A_final/test_data','images')
-part_B_train = os.path.join(root,'part_B_final/train_data','images')
-part_B_test = os.path.join(root,'part_B_final/test_data','images')
 
 path_sets = [part_A_train,part_A_test]
 img_paths = []

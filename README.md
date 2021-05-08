@@ -10,7 +10,7 @@ __Requirements__
 __Dataset__
 
 - [Download](https://drive.google.com/open?id=16dhJn7k4FWVwByRsQAEpl9lwjuV03jVI)
-- change the path in line 47 in make_dataset.py to the Shanghai dataset path you have downloaded
+- change the path in line 19 in make_dataset.py to the Shanghai dataset path you have downloaded
 - Run 'make_dataset.py'
 
 
