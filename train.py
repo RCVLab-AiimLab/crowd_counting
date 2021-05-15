@@ -27,8 +27,8 @@ parser = argparse.ArgumentParser(description='PyTorch CSRNet')
 parser.add_argument('--train_json', metavar='TRAIN', default=path/'part_A_train.json', help='path to train json')
 parser.add_argument('--test_json', metavar='TEST', default=path/'part_A_val.json', help='path to test json')
 parser.add_argument('--pre', '-p', metavar='PRETRAINED', default=None,type=str, help='path to the pretrained model')
-parser.add_argument('--gpu',metavar='GPU', default='1', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path',metavar='CHECKPOINT', default='checkpoint.pth.tar', type=str, help='task id to use.')
+parser.add_argument('--gpu',metavar='GPU', default='0', type=str, help='GPU id to use.')
+parser.add_argument('--checkpoint_path',metavar='CHECKPOINT', default='checkpoint.pth.tar', type=str, help='checkpoint path')
 
 def main():
     
@@ -106,19 +106,15 @@ def train(train_list, model, criterion, optimizer, epoch):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     
-    
     train_loader = torch.utils.data.DataLoader(
         dataset.listDataset(train_list,
                        shuffle=True,
-                       transform=transforms.Compose([
-                       transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225]),
-                   ]), 
+                       transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
                        train=True, 
                        seen=model.seen,
                        batch_size=args.batch_size,
                        num_workers=args.workers),
-        batch_size=args.batch_size)
+                    batch_size=args.batch_size)
     print('epoch %d, processed %d samples, lr %.10f' % (epoch, epoch * len(train_loader.dataset), args.lr))
     
     model.train()
@@ -131,12 +127,8 @@ def train(train_list, model, criterion, optimizer, epoch):
         img = Variable(img)
         output = model(img)
         
-        
-        
-        
         target = target.type(torch.FloatTensor).unsqueeze(0).cuda()
         target = Variable(target)
-        
         
         loss = criterion(output, target)
         
@@ -153,8 +145,7 @@ def train(train_list, model, criterion, optimizer, epoch):
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  .format(
-                   epoch, i, len(train_loader), batch_time=batch_time,
+                  .format(epoch, i, len(train_loader), batch_time=batch_time,
                    data_time=data_time, loss=losses))
     
 def validate(val_list, model, criterion):
@@ -162,10 +153,7 @@ def validate(val_list, model, criterion):
     test_loader = torch.utils.data.DataLoader(
     dataset.listDataset(val_list,
                    shuffle=False,
-                   transform=transforms.Compose([
-                       transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225]),
-                   ]),  train=False),
+                   transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]),  train=False),
     batch_size=args.batch_size)    
     
     model.eval()

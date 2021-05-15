@@ -17,4 +17,5 @@ __Dataset__
 
 __Train__
 
-Run 'train.py'
+- change the path in lines 57 and 58 in train.py to the Shanghai dataset path you have downloaded
+- Run 'train.py'
