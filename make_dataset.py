@@ -74,13 +74,13 @@ for img_path in img_paths:
             hf['density'] = k
 
 
-    #now see a sample from ShanghaiA
-    plt.subplot(1,2,1).imshow(Image.open(img_paths[0]))
-    gt_file = h5py.File(img_paths[0].replace('.jpg','.h5').replace('images','ground_truth'),'r')
-    groundtruth = np.asarray(gt_file['density'])
-    plt.subplot(1,2,2).imshow(groundtruth,cmap=CM.jet)
-    plt.show()
-    count = np.sum(groundtruth)# don't mind this slight variation
+#now see a sample from ShanghaiA
+plt.subplot(1,2,1).imshow(Image.open(img_paths[0]))
+gt_file = h5py.File(img_paths[0].replace('.jpg','.h5').replace('images','ground_truth'),'r')
+groundtruth = np.asarray(gt_file['density'])
+plt.subplot(1,2,2).imshow(groundtruth,cmap=CM.jet)
+plt.show()
+count = np.sum(groundtruth)# don't mind this slight variation
 
 #now generate the ShanghaiB's ground truth
 path_sets = [part_B_train,part_B_test]

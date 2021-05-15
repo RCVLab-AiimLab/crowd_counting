@@ -12,7 +12,7 @@ def load_net(fname, net):
             param = torch.from_numpy(np.asarray(h5f[k]))         
             v.copy_(param)
             
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+def save_checkpoint(state, is_best, filename='../checkpoint.pth.tar'):
     torch.save(state, filename)
     if is_best:
-        shutil.copyfile(filename, 'model_best.pth.tar')            
+        shutil.copyfile(filename, '../model_best.pth.tar')            
