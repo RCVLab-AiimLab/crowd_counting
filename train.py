@@ -28,7 +28,7 @@ parser = argparse.ArgumentParser(description='PyTorch CSRNet')
 
 parser.add_argument('--train_json', metavar='TRAIN', default=path/'part_A_train.json', help='path to train json')
 parser.add_argument('--test_json', metavar='TEST', default=path/'part_A_val.json', help='path to test json')
-parser.add_argument('--pre', '-p', metavar='PRETRAINED', default=None,type=str, help='path to the pretrained model')
+parser.add_argument('--pre', '-p', metavar='PRETRAINED', default='../runs/weights/checkpoint.pth.tar', type=str, help='path to the pretrained model')
 parser.add_argument('--gpu',metavar='GPU', default='1', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path',metavar='CHECKPOINT', default='../runs/weights', type=str, help='checkpoint path')
 parser.add_argument('--log_dir',metavar='CHECKPOINT', default='../runs/log', type=str, help='log dir')
@@ -142,7 +142,7 @@ def train(train_list, model, criterion, optimizer, epoch):
         target = Variable(target)
         
         loss = criterion(output, target)
-        
+
         losses.update(loss.item(), img.size(0))
         optimizer.zero_grad()
         loss.backward()
@@ -157,7 +157,12 @@ def train(train_list, model, criterion, optimizer, epoch):
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   .format(epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses))
+        
+            tb_writer.add_scalar('train loss/iteration', losses.avg, epoch * len(train_loader.dataset) + i)
+
+    tb_writer.add_scalar('train loss/epoch', losses.avg, epoch)
     
+
 def validate(val_list, model, criterion):
     print ('begin test')
     test_loader = torch.utils.data.DataLoader(
