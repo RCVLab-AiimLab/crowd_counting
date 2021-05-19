@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from torchvision import datasets, transforms
+from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
 import argparse
@@ -18,37 +19,55 @@ import json
 import cv2
 import dataset
 import time
+from pathlib import Path
 
 import pathlib
 path = pathlib.Path(__file__).parent.absolute()
-
+print(os.getcwd())
 parser = argparse.ArgumentParser(description='PyTorch CSRNet')
 
 parser.add_argument('--train_json', metavar='TRAIN', default=path/'part_A_train.json', help='path to train json')
 parser.add_argument('--test_json', metavar='TEST', default=path/'part_A_val.json', help='path to test json')
-parser.add_argument('--pre', '-p', metavar='PRETRAINED', default=None,type=str, help='path to the pretrained model')
+parser.add_argument('--pre', '-p', metavar='PRETRAINED', default=path/'runs/weights/checkpoint.pth.tar', type=str, help='path to the pretrained model')
 parser.add_argument('--gpu',metavar='GPU', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path',metavar='CHECKPOINT', default='checkpoint.pth.tar', type=str, help='task id to use.')
+parser.add_argument('--checkpoint_path',metavar='CHECKPOINT', default=path/'runs/weights', type=str, help='checkpoint path')
+parser.add_argument('--log_dir',metavar='CHECKPOINT', default=path/'runs/log', type=str, help='log dir')
+parser.add_argument('--gpu_log_dir',metavar='CHECKPOINT', default=path/'runs/gpulog', type=str, help='GPU log dir')
+
+
+    
+global args,best_prec1
+
+best_prec1 = 1e6
+
+args = parser.parse_args()
+args.original_lr = 1e-7
+args.lr = 1e-7
+args.batch_size    = 1
+args.momentum      = 0.95
+args.decay         = 5*1e-4
+args.start_epoch   = 0
+args.epochs = 400
+args.steps         = [-1,1,100,150]
+args.scales        = [1,1,1,1]
+args.workers = 4
+args.seed = time.time()
+args.print_freq = 30
+
+tb_writer = SummaryWriter(args.log_dir)
+gpu_writer = SummaryWriter(args.gpu_log_dir)
 
 def main():
-    
-    global args,best_prec1
-    
+
+    data_time = AverageMeter()
     best_prec1 = 1e6
-    
-    args = parser.parse_args()
-    args.original_lr = 1e-7
-    args.lr = 1e-7
-    args.batch_size    = 1
-    args.momentum      = 0.95
-    args.decay         = 5*1e-4
-    args.start_epoch   = 0
-    args.epochs = 400
-    args.steps         = [-1,1,100,150]
-    args.scales        = [1,1,1,1]
-    args.workers = 4
-    args.seed = time.time()
-    args.print_freq = 30
+    command = os.popen('nvidia-smi -L')
+    GPU = command.read()
+    print('checkpoint path is ',args.checkpoint_path)
+    if not Path(args.checkpoint_path).exists():
+        os.mkdir(args.checkpoint_path)
+    args.checkpoint_path = os.path.join(args.checkpoint_path,'checkpoint.pth.tar')
+
     with open(args.train_json, 'r') as outfile:        
         train_list = json.load(outfile)
     with open(args.test_json, 'r') as outfile:       
@@ -67,13 +86,14 @@ def main():
     criterion = nn.MSELoss(size_average=False).cuda()
     
     optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=args.momentum, weight_decay=args.decay)
-
     if args.pre:
         if os.path.isfile(args.pre):
             print("=> loading checkpoint '{}'".format(args.pre))
             checkpoint = torch.load(args.pre)
             args.start_epoch = checkpoint['epoch']
             best_prec1 = checkpoint['best_prec1']
+            print('type is ',type(checkpoint['time']))
+            data_time = checkpoint['time']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint '{}' (epoch {})"
@@ -85,7 +105,7 @@ def main():
         
         adjust_learning_rate(optimizer, epoch)
         
-        train(train_list, model, criterion, optimizer, epoch)
+        train(train_list, model, criterion, optimizer, epoch, data_time, GPU)
         prec1 = validate(val_list, model, criterion)
         
         is_best = prec1 < best_prec1
@@ -98,50 +118,46 @@ def main():
             'state_dict': model.state_dict(),
             'best_prec1': best_prec1,
             'optimizer' : optimizer.state_dict(),
+            'time' : data_time,
+            'GPU' : GPU,
         }, is_best, args.checkpoint_path)
 
-def train(train_list, model, criterion, optimizer, epoch):
+def train(train_list, model, criterion, optimizer, epoch, data_time, GPU):
     
     losses = AverageMeter()
     batch_time = AverageMeter()
-    data_time = AverageMeter()
     
     
     train_loader = torch.utils.data.DataLoader(
         dataset.listDataset(train_list,
                        shuffle=True,
-                       transform=transforms.Compose([
-                       transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225]),
-                   ]), 
+                       transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
                        train=True, 
                        seen=model.seen,
                        batch_size=args.batch_size,
                        num_workers=args.workers),
-        batch_size=args.batch_size)
+                    batch_size=args.batch_size)
     print('epoch %d, processed %d samples, lr %.10f' % (epoch, epoch * len(train_loader.dataset), args.lr))
     
     model.train()
     end = time.time()
-    # train_features, train_labels = next(iter(train_loader))
-    # print(train_features)
+    
     for i,(img, target)in enumerate(train_loader):
-        # print(target.shape)
         data_time.update(time.time() - end)
         
         img = img.cuda()
         img = Variable(img)
         output = model(img)
-        # print('output is',output.shape)
         
-        
+        if epoch == 1:
+            tb_writer.add_graph(torch.jit.trace(model, img, strict=False), [])
+            gpu_writer.add_text('GPU_Model', GPU)
         
         target = target.type(torch.FloatTensor).unsqueeze(0).cuda()
         target = Variable(target)
         
-        
         loss = criterion(output, target)
-        
+
         losses.update(loss.item(), img.size(0))
         optimizer.zero_grad()
         loss.backward()
@@ -155,19 +171,19 @@ def train(train_list, model, criterion, optimizer, epoch):
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                   'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                   'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  .format(
-                   epoch, i, len(train_loader), batch_time=batch_time,
-                   data_time=data_time, loss=losses))
+                  .format(epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses))
+        
+            tb_writer.add_scalar('train loss/iteration', losses.avg, epoch * len(train_loader.dataset) + i)
+
+    tb_writer.add_scalar('train loss/epoch', losses.avg, epoch)
     
+
 def validate(val_list, model, criterion):
     print ('begin test')
     test_loader = torch.utils.data.DataLoader(
     dataset.listDataset(val_list,
                    shuffle=False,
-                   transform=transforms.Compose([
-                       transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225]),
-                   ]),  train=False),
+                   transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]),  train=False),
     batch_size=args.batch_size)    
     
     model.eval()
@@ -190,13 +206,11 @@ def validate(val_list, model, criterion):
 def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
     
-    
     args.lr = args.original_lr
     
     for i in range(len(args.steps)):
         
         scale = args.scales[i] if i < len(args.scales) else 1
-        
         
         if epoch >= args.steps[i]:
             args.lr = args.lr * scale
@@ -223,6 +237,7 @@ class AverageMeter(object):
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count    
+
     
 if __name__ == '__main__':
-    main()        
+    main() 

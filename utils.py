@@ -15,4 +15,5 @@ def load_net(fname, net):
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
     if is_best:
-        shutil.copyfile(filename, 'model_best.pth.tar')            
+        best_model_path = filename.replace('checkpoint.pth.tar', 'model_best.pth.tar')
+        shutil.copyfile(filename, best_model_path)  
