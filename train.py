@@ -20,19 +20,23 @@ import cv2
 import dataset
 import time
 from pathlib import Path
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+
 
 import pathlib
 path = pathlib.Path(__file__).parent.absolute()
 print(os.getcwd())
+print(path)
 parser = argparse.ArgumentParser(description='PyTorch CSRNet')
 
-parser.add_argument('--train_json', metavar='TRAIN', default=path/'part_A_train.json', help='path to train json')
-parser.add_argument('--test_json', metavar='TEST', default=path/'part_A_val.json', help='path to test json')
-parser.add_argument('--pre', '-p', metavar='PRETRAINED', default=path/'runs/weights/checkpoint.pth.tar', type=str, help='path to the pretrained model')
-parser.add_argument('--gpu',metavar='GPU', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path',metavar='CHECKPOINT', default=path/'runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir',metavar='CHECKPOINT', default=path/'runs/log', type=str, help='log dir')
-parser.add_argument('--gpu_log_dir',metavar='CHECKPOINT', default=path/'runs/gpulog', type=str, help='GPU log dir')
+parser.add_argument('--train_json', metavar='TRAIN', default=os.path.join(path,'part_A_train.json'), help='path to train json')
+parser.add_argument('--test_json', metavar='TEST', default=os.path.join(path,'part_A_val.json'), help='path to test json')
+parser.add_argument('--pre', '-p', metavar='PRETRAINED', default=os.path.join(path,'runs/weights/checkpoint.pth.tar'), type=str, help='path to the pretrained model')
+parser.add_argument('--gpu',metavar='GPU', default='0', type=str, help= 'GPU id to use.')
+parser.add_argument('--checkpoint_path',metavar='CHECKPOINT', default= os.path.join(path,'runs/weights'), type=str, help='checkpoint path')
+parser.add_argument('--log_dir',metavar='CHECKPOINT', default= os.path.join(path,'runs/logs'), type=str, help='log dir')
+parser.add_argument('--gpu_log_dir',metavar='CHECKPOINT', default= os.path.join(path,'runs/gpulogs'), type=str, help='GPU log dir')
 
 
     
@@ -55,15 +59,14 @@ args.seed = time.time()
 args.print_freq = 30
 
 tb_writer = SummaryWriter(args.log_dir)
-gpu_writer = SummaryWriter(args.gpu_log_dir)
+gpu_time_writer = SummaryWriter(args.gpu_log_dir)
 
 def main():
 
-    data_time = AverageMeter()
+    
     best_prec1 = 1e6
     command = os.popen('nvidia-smi -L')
     GPU = command.read()
-    print('checkpoint path is ',args.checkpoint_path)
     if not Path(args.checkpoint_path).exists():
         os.mkdir(args.checkpoint_path)
     args.checkpoint_path = os.path.join(args.checkpoint_path,'checkpoint.pth.tar')
@@ -72,10 +75,9 @@ def main():
         train_list = json.load(outfile)
     with open(args.test_json, 'r') as outfile:       
         val_list = json.load(outfile)
+    train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/content/drive/My Drive/Queens/Crowdcounting/dataset/ShanghaiTech') for st in train_list]
+    val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/content/drive/My Drive/Queens/Crowdcounting/dataset/ShanghaiTech') for st in val_list]
 
-    train_list = [st.replace('/home/leeyh/Downloads/Shanghai', 'dataset/ShanghaiTech') for st in train_list]
-    val_list = [st.replace('/home/leeyh/Downloads/Shanghai', 'dataset/ShanghaiTech') for st in val_list]
-    
     # os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
     torch.cuda.manual_seed(args.seed)
     
@@ -92,8 +94,6 @@ def main():
             checkpoint = torch.load(args.pre)
             args.start_epoch = checkpoint['epoch']
             best_prec1 = checkpoint['best_prec1']
-            print('type is ',type(checkpoint['time']))
-            data_time = checkpoint['time']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint '{}' (epoch {})"
@@ -105,7 +105,7 @@ def main():
         
         adjust_learning_rate(optimizer, epoch)
         
-        train(train_list, model, criterion, optimizer, epoch, data_time, GPU)
+        train(train_list, model, criterion, optimizer, epoch, GPU)
         prec1 = validate(val_list, model, criterion)
         
         is_best = prec1 < best_prec1
@@ -118,15 +118,13 @@ def main():
             'state_dict': model.state_dict(),
             'best_prec1': best_prec1,
             'optimizer' : optimizer.state_dict(),
-            'time' : data_time,
-            'GPU' : GPU,
         }, is_best, args.checkpoint_path)
 
-def train(train_list, model, criterion, optimizer, epoch, data_time, GPU):
+def train(train_list, model, criterion, optimizer, epoch, GPU):
     
     losses = AverageMeter()
     batch_time = AverageMeter()
-    
+    data_time = AverageMeter()
     
     train_loader = torch.utils.data.DataLoader(
         dataset.listDataset(train_list,
@@ -149,9 +147,9 @@ def train(train_list, model, criterion, optimizer, epoch, data_time, GPU):
         img = Variable(img)
         output = model(img)
         
-        if epoch == 1:
-            tb_writer.add_graph(torch.jit.trace(model, img, strict=False), [])
-            gpu_writer.add_text('GPU_Model', GPU)
+        # if epoch == 1:
+        #     tb_writer.add_graph(torch.jit.trace(model, img, strict=False), [])
+
         
         target = target.type(torch.FloatTensor).unsqueeze(0).cuda()
         target = Variable(target)
@@ -174,9 +172,10 @@ def train(train_list, model, criterion, optimizer, epoch, data_time, GPU):
                   .format(epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses))
         
             tb_writer.add_scalar('train loss/iteration', losses.avg, epoch * len(train_loader.dataset) + i)
-
+    gpu_time_writer.add_text('GPU_Model', GPU)
+    gpu_time_writer.add_text('time', str(data_time.sum))
     tb_writer.add_scalar('train loss/epoch', losses.avg, epoch)
-    
+
 
 def validate(val_list, model, criterion):
     print ('begin test')
