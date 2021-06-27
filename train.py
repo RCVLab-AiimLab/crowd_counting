@@ -75,8 +75,8 @@ def main():
         train_list = json.load(outfile)
     with open(args.test_json, 'r') as outfile:       
         val_list = json.load(outfile)
-    train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/content/drive/My Drive/Queens/Crowdcounting/dataset/ShanghaiTech') for st in train_list]
-    val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/content/drive/My Drive/Queens/Crowdcounting/dataset/ShanghaiTech') for st in val_list]
+    train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/content/drive/MyDrive/Crowd/ShanghaiTech') for st in train_list]
+    val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/content/drive/MyDrive/Crowd/ShanghaiTech') for st in val_list]
 
     # os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
     torch.cuda.manual_seed(args.seed)
