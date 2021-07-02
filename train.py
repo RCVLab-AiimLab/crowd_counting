@@ -12,6 +12,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 from torchvision import datasets, transforms
 from torch.utils.tensorboard import SummaryWriter
+from skimage.transform import resize, downscale_local_mean
 
 import numpy as np
 import argparse
@@ -20,20 +21,29 @@ import cv2
 import dataset
 import time
 from pathlib import Path
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+
 
 import pathlib
 path = pathlib.Path(__file__).parent.absolute()
-
+print(os.getcwd())
+print('path is',path)
 parser = argparse.ArgumentParser(description='PyTorch CSRNet')
 
-parser.add_argument('--train_json', metavar='TRAIN', default=path/'part_A_train.json', help='path to train json')
-parser.add_argument('--test_json', metavar='TEST', default=path/'part_A_val.json', help='path to test json')
-parser.add_argument('--pre', '-p', metavar='PRETRAINED', default='../runs/weights/checkpoint.pth.tar', type=str, help='path to the pretrained model')
-parser.add_argument('--gpu',metavar='GPU', default='1', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path',metavar='CHECKPOINT', default='../runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir',metavar='CHECKPOINT', default='../runs/log', type=str, help='log dir')
+parser.add_argument('--train_json', metavar='TRAIN', default=os.path.join(path,'part_A_train.json'), help='path to train json')
+parser.add_argument('--test_json', metavar='TEST', default=os.path.join(path,'part_A_val.json'), help='path to test json')
+parser.add_argument('--pre', '-p', metavar='PRETRAINED', default=os.path.join(path,'runs/weights/checkpoint.pth.tar'), type=str, help='path to the pretrained model')
+parser.add_argument('--gpu',metavar='GPU', default='0', type=str, help= 'GPU id to use.')
+parser.add_argument('--checkpoint_path',metavar='CHECKPOINT', default= os.path.join(path,'runs/weights'), type=str, help='checkpoint path')
+parser.add_argument('--log_dir',metavar='CHECKPOINT', default= os.path.join(path,'runs/logs'), type=str, help='log dir')
+parser.add_argument('--gpu_log_dir',metavar='CHECKPOINT', default= os.path.join(path,'runs/gpulogs'), type=str, help='GPU log dir')
 
+
+    
 global args,best_prec1
+
+best_prec1 = 1e6
 
 args = parser.parse_args()
 args.original_lr = 1e-7
@@ -50,24 +60,26 @@ args.seed = time.time()
 args.print_freq = 30
 
 tb_writer = SummaryWriter(args.log_dir)
-   
+gpu_time_writer = SummaryWriter(args.gpu_log_dir)
+
 def main():
+
     
     best_prec1 = 1e6
-    
+    command = os.popen('nvidia-smi -L')
+    GPU = command.read()
     if not Path(args.checkpoint_path).exists():
         os.mkdir(args.checkpoint_path)
-    args.checkpoint_path += '/checkpoint.pth.tar'
+    args.checkpoint_path = os.path.join(args.checkpoint_path,'checkpoint.pth.tar')
 
     with open(args.train_json, 'r') as outfile:        
         train_list = json.load(outfile)
     with open(args.test_json, 'r') as outfile:       
         val_list = json.load(outfile)
+    train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/content/drive/My Drive/Queens/capsnet_crowd/dataset') for st in train_list]
+    val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/content/drive/My Drive/Queens/capsnet_crowd/dataset') for st in val_list]
 
-    train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in train_list]
-    val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in val_list]
-    
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
+    # os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
     torch.cuda.manual_seed(args.seed)
     
     model = CSRNet()
@@ -75,9 +87,9 @@ def main():
     model = model.cuda()
     
     criterion = nn.MSELoss(size_average=False).cuda()
+    criterion_val = nn.MSELoss(size_average=False).cuda()
     
     optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=args.momentum, weight_decay=args.decay)
-
     if args.pre:
         if os.path.isfile(args.pre):
             print("=> loading checkpoint '{}'".format(args.pre))
@@ -95,20 +107,22 @@ def main():
         
         adjust_learning_rate(optimizer, epoch)
         
-        train(train_list, model, criterion, optimizer, epoch)
-        prec1 = validate(val_list, model, criterion)
+        train(train_list, model, criterion, optimizer, epoch, GPU)
+        prec1 = validate(val_list, model, criterion_val, epoch)
         
         is_best = prec1 < best_prec1
         best_prec1 = min(prec1, best_prec1)
-        print(' * best MAE {mae:.3f} '.format(mae=best_prec1))
+        print(' * best MAE {mae:.3f} '
+              .format(mae=best_prec1))
         save_checkpoint({
             'epoch': epoch + 1,
             'arch': args.pre,
             'state_dict': model.state_dict(),
             'best_prec1': best_prec1,
-            'optimizer' : optimizer.state_dict(),}, is_best, args.checkpoint_path)
+            'optimizer' : optimizer.state_dict(),
+        }, is_best, args.checkpoint_path)
 
-def train(train_list, model, criterion, optimizer, epoch):
+def train(train_list, model, criterion, optimizer, epoch, GPU):
     
     losses = AverageMeter()
     batch_time = AverageMeter()
@@ -129,17 +143,24 @@ def train(train_list, model, criterion, optimizer, epoch):
     end = time.time()
     
     for i,(img, target)in enumerate(train_loader):
+        # image = downscale_local_mean(img, (1, 1))
+        # target_d = downscale_local_mean(target, (1, 1))
         data_time.update(time.time() - end)
         
         img = img.cuda()
         img = Variable(img)
         output = model(img)
+        
+        # if epoch == 1:
+        #     tb_writer.add_graph(torch.jit.trace(model, img, strict=False), [])
 
-        if epoch == 1:
-            tb_writer.add_graph(torch.jit.trace(model, img, strict=False), [])
         
         target = target.type(torch.FloatTensor).unsqueeze(0).cuda()
         target = Variable(target)
+        # target_fake = torch.rand(1,512,120,67).cuda()
+        # target_fake = torch.rand(1,10,10).cuda()
+        # print('target',target.shape)
+        # print('output',output.shape)
         
         loss = criterion(output, target)
 
@@ -159,12 +180,14 @@ def train(train_list, model, criterion, optimizer, epoch):
                   .format(epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses))
         
             tb_writer.add_scalar('train loss/iteration', losses.avg, epoch * len(train_loader.dataset) + i)
-
+    gpu_time_writer.add_text('GPU_Model', GPU)
+    gpu_time_writer.add_text('time', str(data_time.sum))
     tb_writer.add_scalar('train loss/epoch', losses.avg, epoch)
-    
 
-def validate(val_list, model, criterion):
+
+def validate(val_list, model, criterion_val, epoch):
     print ('begin test')
+    losses_val = AverageMeter()
     test_loader = torch.utils.data.DataLoader(
     dataset.listDataset(val_list,
                    shuffle=False,
@@ -178,10 +201,13 @@ def validate(val_list, model, criterion):
     for i,(img, target) in enumerate(test_loader):
         img = img.cuda()
         img = Variable(img)
-        output = model(img)
-        
+        target = target.cuda()
+        output = model(img).cuda()
+        loss_val = criterion_val(output, target)
+
+        losses_val.update(loss_val.item(), img.size(0))
         mae += abs(output.data.sum()-target.sum().type(torch.FloatTensor).cuda())
-        
+    tb_writer.add_scalar('valid loss/epoch', losses_val.avg, epoch)    
     mae = mae/len(test_loader)    
     print(' * MAE {mae:.3f} '
               .format(mae=mae))
@@ -225,4 +251,4 @@ class AverageMeter(object):
 
     
 if __name__ == '__main__':
-    main()        
+    main() 

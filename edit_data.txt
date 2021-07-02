@@ -1,0 +1,15 @@
+import json
+import numpy as np
+import copy
+f = open('/content/drive/My Drive/Queens/Crowdcounting_CARLA/code/part_B_train.json',)
+files = json.load(f)
+files2 = copy.deepcopy(files)
+for i,name in enumerate(files):
+    if int(name.split('/')[-1].split('_')[-1].split('.')[0])>100:
+        # print(i)
+        # print(name)
+        files2.remove(name)
+with open('/content/drive/My Drive/Queens/Crowdcounting_CARLA/code/part_B_train.json', 'w') as f:
+    json.dump(files2, f)
+
+      
