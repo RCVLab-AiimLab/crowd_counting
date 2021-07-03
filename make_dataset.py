@@ -77,18 +77,20 @@ for im_n, img_path in enumerate(img_paths):
     for i in range(0,len(gt)):
         if int(gt[i][1])<img.shape[0] and int(gt[i][0])<img.shape[1]:
             k[int(gt[i][1]),int(gt[i][0])]=1
+    plt.subplot(1,3,2).imshow(k)
+    plt.title('Original people count: ' + str(np.sum(k)))
     k = gaussian_filter_density(k)
     with h5py.File(img_path.replace('.jpg','.h5').replace('images','ground_truth'), 'w') as hf:
             hf['density'] = k
 
-    '''#now see a sample
-    plt.subplot(1,2,1).imshow(Image.open(img_paths[im_n]))
+    #now see a sample
+    plt.subplot(1,3,1).imshow(Image.open(img_paths[im_n]))
     gt_file = h5py.File(img_paths[im_n].replace('.jpg','.h5').replace('images','ground_truth'),'r')
     groundtruth = np.asarray(gt_file['density'])
-    plt.subplot(1,2,2).imshow(groundtruth,cmap=CM.jet)
+    plt.subplot(1,3,3).imshow(groundtruth,cmap=CM.jet)
     count = np.sum(groundtruth)# don't mind this slight variation
-    plt.title('People count: ' + str(np.round(count)))
-    plt.show()'''
+    plt.title('People count after filter: ' + str(count))
+    plt.show()
 
 #now generate the ShanghaiB's ground truth
 path_sets = [part_B_train,part_B_test]
@@ -110,11 +112,11 @@ for im_n, img_path in enumerate(img_paths):
     with h5py.File(img_path.replace('.jpg','.h5').replace('images','ground_truth'), 'w') as hf:
             hf['density'] = k
     
-    '''#now see a sample 
+    #now see a sample 
     plt.subplot(1,2,1).imshow(Image.open(img_paths[im_n]))
     gt_file = h5py.File(img_paths[im_n].replace('.jpg','.h5').replace('images','ground_truth'),'r')
     groundtruth = np.asarray(gt_file['density'])
     plt.subplot(1,2,2).imshow(groundtruth,cmap=CM.jet)
     count = np.sum(groundtruth)# don't mind this slight variation
     plt.title('People count: ' + str(np.round(count)))
-    plt.show()'''
+    plt.show()
