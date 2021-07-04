@@ -20,34 +20,59 @@ import cv2
 import dataset
 import time
 from pathlib import Path
+import matplotlib.pyplot as plt
+from matplotlib import cm as CM
+import math
 
 import pathlib
 path = pathlib.Path(__file__).parent.absolute()
+
 
 parser = argparse.ArgumentParser(description='PyTorch CSRNet')
 
 parser.add_argument('--train_json', metavar='TRAIN', default=path/'part_A_train.json', help='path to train json')
 parser.add_argument('--test_json', metavar='TEST', default=path/'part_A_val.json', help='path to test json')
 parser.add_argument('--pre', '-p', metavar='PRETRAINED', default='../runs/weights/checkpoint.pth.tar', type=str, help='path to the pretrained model')
-parser.add_argument('--gpu',metavar='GPU', default='1', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path',metavar='CHECKPOINT', default='../runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir',metavar='CHECKPOINT', default='../runs/log', type=str, help='log dir')
+parser.add_argument('--use_pre', metavar='USEPRETRAINED', default=False, type=bool, help='use the pretrained model?')
+parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
+parser.add_argument('--gpu_id', metavar='GPU_ID', default='0', type=str, help='GPU id to use.')
+parser.add_argument('--checkpoint_path', metavar='CHECKPOINT', default='../runs/weights', type=str, help='checkpoint path')
+parser.add_argument('--log_dir', metavar='CHECKPOINT', default='../runs/log', type=str, help='log dir')
 
-global args,best_prec1
+parser.add_argument('--depth', metavar='DEPTH', default=False, type=bool, help='using depth?')
+parser.add_argument('--capsnet', metavar='CAPSNET', default=True, type=bool, help='using capsnet?')
+parser.add_argument('--input_size', metavar="input_size", default=256, type=int)
+
+parser.add_argument('--lr', metavar="learning_rate", default=0.001, type=float, help="learning rate")
+parser.add_argument('--decoder', metavar="decoder", default='FC', help="Decoder structure 'FC' or 'Conv'")
+parser.add_argument('--batch_size', metavar="batch_size", default=1, type=int)
+parser.add_argument('--epochs', metavar="epochs", default=300, type=int, help="Number of epochs to train for")
+parser.add_argument('--file', metavar="filepath", default="", type=str, help="Name of the model to be loaded")
+parser.add_argument('--save_images', default=True, action="store_false", help="Set if you want to save reconstruction results each epoch")
+parser.add_argument('--alpha', default=0.0005, type=float, help="Alpha constant from paper (Amount of reconstruction loss)")
+parser.add_argument('--dataset', default='shanghai', help="Set wanted dataset. Options: [mnist, small_norb,cifar10]")
+parser.add_argument('--routing', metavar="routing_iterations", default=3, type=int, help="Number of routing iterations to use")
+parser.add_argument('--logfile', metavar="log_filepath", default="", type=str, help="Path to previous logfile if continuing training")
+parser.add_argument('--batch_norm', default=False, type=int, help="Turn on/off batch norm in encoder/decoder")
+parser.add_argument('--loss', metavar="loss_type", default="L2", help="Define reconstruction loss. Types: [L1, L2]")
+parser.add_argument('--anneal_alpha', default="none", help="Set annealing function for alpha. Options: [none, 1, 2]")
+parser.add_argument('--leaky', default=False, action="store_true",  help="Turn on/off leaky routing (Add orphan class for reconstruction)")
+parser.add_argument('--model', default='model', help="Set model name")
+
+
+global args, best_prec1
 
 args = parser.parse_args()
-args.original_lr = 1e-7
-args.lr = 1e-7
-args.batch_size    = 1
+args.original_lr = args.lr # 1e-7
+#args.lr = 1e-7
 args.momentum      = 0.95
 args.decay         = 5*1e-4
 args.start_epoch   = 0
-args.epochs = 400
 args.steps         = [-1,1,100,150]
 args.scales        = [1,1,1,1]
 args.workers = 4
 args.seed = time.time()
-args.print_freq = 30
+args.print_freq = 1
 
 tb_writer = SummaryWriter(args.log_dir)
    
@@ -67,18 +92,30 @@ def main():
     train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in train_list]
     val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in val_list]
     
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
-    torch.cuda.manual_seed(args.seed)
+    if args.use_gpu:
+        os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
+        torch.cuda.manual_seed(args.seed)
+        CUDA =True
+    else:
+        CUDA = False
+
+    if args.capsnet:
+        model = CSRNet(args.depth, args.capsnet, reconstruction_type=args.decoder, imsize=args.input_size//8, 
+                        routing_iterations=args.routing, primary_caps_gridsize=8,
+                        img_channel=3, batchnorm=args.batch_norm, num_primary_capsules=32,
+                        loss=args.loss, leaky_routing=args.leaky)
+    else:
+        model = CSRNet(args.depth, args.capsnet)
     
-    model = CSRNet()
+    criterion = nn.MSELoss(size_average=False)
     
-    model = model.cuda()
-    
-    criterion = nn.MSELoss(size_average=False).cuda()
-    
+    if CUDA:
+        model = model.cuda()
+        criterion = nn.MSELoss(size_average=False).cuda()
+
     optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=args.momentum, weight_decay=args.decay)
 
-    if args.pre:
+    if args.pre and args.use_pre:
         if os.path.isfile(args.pre):
             print("=> loading checkpoint '{}'".format(args.pre))
             checkpoint = torch.load(args.pre)
@@ -95,7 +132,7 @@ def main():
         
         adjust_learning_rate(optimizer, epoch)
         
-        train(train_list, model, criterion, optimizer, epoch)
+        train(train_list, model, criterion, optimizer, epoch, CUDA)
         prec1 = validate(val_list, model, criterion)
         
         is_best = prec1 < best_prec1
@@ -108,7 +145,15 @@ def main():
             'best_prec1': best_prec1,
             'optimizer' : optimizer.state_dict(),}, is_best, args.checkpoint_path)
 
-def train(train_list, model, criterion, optimizer, epoch):
+def zeropad(img, h, w, target=False):
+    if not target:
+        color = [0, 0, 0]
+        padded = cv2.copyMakeBorder(img, 0, h, 0, w, cv2.BORDER_CONSTANT, value=color)
+    else:
+        padded = cv2.copyMakeBorder(img, 0, h, 0, w, cv2.BORDER_CONSTANT, value=0)
+    return padded
+
+def train(train_list, model, criterion, optimizer, epoch, CUDA):
     
     losses = AverageMeter()
     batch_time = AverageMeter()
@@ -121,55 +166,111 @@ def train(train_list, model, criterion, optimizer, epoch):
                        train=True, 
                        seen=model.seen,
                        batch_size=args.batch_size,
-                       num_workers=args.workers),
+                       num_workers=args.workers,
+                       img_size=args.input_size),
                     batch_size=args.batch_size)
     print('epoch %d, processed %d samples, lr %.10f' % (epoch, epoch * len(train_loader.dataset), args.lr))
     
     model.train()
     end = time.time()
-    
-    for i,(img, target)in enumerate(train_loader):
+
+    # Annealing alpha
+    alpha = get_alpha(epoch)
+
+    length = 128
+    for i, (img, target) in enumerate(train_loader):
         data_time.update(time.time() - end)
-        
-        img = img.cuda()
-        img = Variable(img)
-        output = model(img)
 
-        if epoch == 1:
-            tb_writer.add_graph(torch.jit.trace(model, img, strict=False), [])
-        
-        target = target.type(torch.FloatTensor).unsqueeze(0).cuda()
-        target = Variable(target)
-        
-        loss = criterion(output, target)
+        ###### clip-based training
+        ni = int(math.ceil(img.shape[2] / length))  # up-down
+        nj = int(math.ceil(img.shape[3] / length))  # left-right
+        for i in range(ni):  
+            print('row %g/%g: ' % (i, ni-1), end='')
+            for j in range(nj):  
+                print('%g ' % j, end='', flush=True)
+                y2 = min((i + 1) * length, img.shape[2])
+                y1 = y2 - length
+                x2 = min((j + 1) * length, img.shape[3])
+                x1 = x2 - length
 
-        losses.update(loss.item(), img.size(0))
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()    
-        
-        batch_time.update(time.time() - end)
-        end = time.time()
-        
-        if i % args.print_freq == 0:
-            print('Epoch: [{0}][{1}/{2}]\t'
-                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  .format(epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses))
-        
-            tb_writer.add_scalar('train loss/iteration', losses.avg, epoch * len(train_loader.dataset) + i)
+                img_chip = img[:, :, y1:y2, x1:x2]
+                img_chip = zeropad(img_chip.squeeze(0).permute(1,2,0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3])
+                img_chip = torch.from_numpy(img_chip).permute(2,0,1).unsqueeze(0)
+                target_chip = target[:, y1:y2, x1:x2]
+                target_chip = zeropad(target_chip.squeeze(0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3], target=True)
+                target_chip = torch.from_numpy(target_chip).unsqueeze(0)
+                assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
+                assert target_chip.shape[1] == target_chip.shape[2] == length, 'target size error'
 
-    tb_writer.add_scalar('train loss/epoch', losses.avg, epoch)
-    
+                '''
+                imtest = img_chip[0,...].permute(1, 2, 0).cpu()
+                imtest = cv2.normalize(np.float32(imtest), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+                imtest = imtest.astype(np.uint8)
+                plt.subplot(121).imshow(imtest)
+                plt.subplot(122).imshow(target_chip.squeeze(0), cmap=CM.jet)
+                count = np.sum(target_chip.numpy().squeeze(0))# don't mind this slight variation
+                plt.title('People count: ' + str(count))
+                plt.show()
+                '''
+                
+                target = target_chip.type(torch.FloatTensor).unsqueeze(0)
+
+                img = Variable(img_chip)
+                target = Variable(target)
+
+                if CUDA:
+                    img = img.cuda()
+                    target = target.cuda()
+                
+                x_csr_frontend, output, x_caps, reconstruction, _ = model(img)
+
+                '''
+                if epoch <= 1:
+                    tb_writer.add_graph(torch.jit.trace(model, img, strict=False), [])
+                '''
+                
+                loss_caps, rec_loss, marg_loss = model.loss(x_csr_frontend, target, x_caps, reconstruction, alpha)
+                
+                loss_csr = criterion(output, target)
+
+                loss = (loss_caps + loss_csr).mean()
+
+                losses.update(loss.item(), img.size(0))
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()    
+                
+                batch_time.update(time.time() - end)
+                end = time.time()
+                
+                if i % args.print_freq == 0:
+                    print('Epoch: [{0}][{1}/{2}]\t'
+                        'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                        'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                        'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                        .format(epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses))
+                
+                    tb_writer.add_scalar('train loss/iteration', losses.avg, epoch * len(train_loader.dataset) + i)
+
+            tb_writer.add_scalar('train loss/epoch', losses.avg, epoch)
+        ######
+
+
+def get_alpha(epoch):
+    # WARNING: Does not support alpha value saving when continuning training from a saved model
+    DEFAULT_ANNEAL_TEMPERATURE = 8
+    if args.anneal_alpha == "none":
+        alpha = args.alpha
+    if args.anneal_alpha == "1":
+        alpha = args.alpha * float(np.tanh(epoch/DEFAULT_ANNEAL_TEMPERATURE - np.pi) + 1) / 2
+    if args.anneal_alpha == "2":
+        alpha = args.alpha * float(np.tanh(epoch/(2 * DEFAULT_ANNEAL_TEMPERATURE)))
+    return alpha
+
 
 def validate(val_list, model, criterion):
     print ('begin test')
-    test_loader = torch.utils.data.DataLoader(
-    dataset.listDataset(val_list,
-                   shuffle=False,
-                   transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]),  train=False),
-    batch_size=args.batch_size)    
+    test_loader = torch.utils.data.DataLoader(dataset.listDataset(val_list, shuffle=False, transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), train=False, img_size=args.input_size), batch_size=args.batch_size)    
     
     model.eval()
     
