@@ -13,7 +13,7 @@ class CSRNet(nn.Module):
         
         super(CSRNet, self).__init__()
         self.seen = 0
-        self.capsnet = self.make_layers(capsnet=capsnet, in_channels=self.frontend_feat[-1], primary_caps_gridsize=primary_caps_gridsize, imsize=imsize)
+        self.capsnet = self.make_layers(in_channels=self.frontend_feat[-1], primary_caps_gridsize=primary_caps_gridsize, imsize=imsize)
         self.output_layer = nn.Conv2d(64, 1, kernel_size=1)
         self.use_reconstruction = True
         if not load_weights:
@@ -44,57 +44,34 @@ class CSRNet(nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-    def make_layers(self, csrnet_cfg=None, in_channels=3, batch_norm=False, kernel_size=3, dilation=False, capsnet=False, imsize=64, 
+    def make_layers(self, in_channels=3, batch_norm=False, kernel_size=3, dilation=False, imsize=64, 
                     img_channel=3, batchnorm=False, leaky_routing=False, primary_caps_gridsize=6,
                     num_primary_capsules=32, routing_iterations=3, reconstruction_type='FC',
                     loss='L2'):
         
-        if not capsnet:
-            if dilation:
-                d_rate = 2
-            else:
-                d_rate = 1
-            layers = []
-            for v in csrnet_cfg:
-                if v == 'M':
-                    layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
-                else:
-                    conv2d = nn.Conv2d(in_channels, v, kernel_size=kernel_size, padding=d_rate, dilation=d_rate)
-                    if batch_norm:
-                        layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
-                    else:
-                        layers += [conv2d, nn.ReLU(inplace=True)]
-                    in_channels = v
-            return nn.Sequential(*layers) 
+        self.conv_layer = ConvLayer(in_channels=3, batchnorm=batchnorm)
+        self.leaky_routing = leaky_routing
+        self.primary_capsules = PrimaryCapsules(in_channels=in_channels, primary_caps_gridsize=primary_caps_gridsize, batchnorm=batchnorm, num_capsules=num_primary_capsules)
 
-        elif capsnet:  
-            self.conv_layer = ConvLayer(in_channels=3, batchnorm=batchnorm)
-            self.leaky_routing = leaky_routing
-            self.primary_capsules = PrimaryCapsules(in_channels=in_channels, primary_caps_gridsize=primary_caps_gridsize, batchnorm=batchnorm, num_capsules=num_primary_capsules)
-            #self.primary_capsules = PrimaryCapsules(input_shape=(256, 20, 20), capsule_dim=8, out_channels=32, kernel_size=9, stride=2)
-            #self.routing = Routing(caps_dim_before=8, caps_dim_after=16, n_capsules_before=6*6*32, n_capsules_after=10, n_routing_iter=3)
-            #self.norm = Norm()
-            #self.decoder = Decoder(16, int(np.prod([3,32,32])))
-
-            self.digit_caps = ClassCapsules(num_routes=num_primary_capsules*primary_caps_gridsize*primary_caps_gridsize, routing_iterations=routing_iterations, leaky=leaky_routing, in_channels=8)
-            if reconstruction_type == "FC":
-                self.decoder = ReconstructionModule(imsize=imsize, img_channel=3, batchnorm=batchnorm)
-            elif reconstruction_type == "Conv32":
-                self.decoder = SmallNorbConvReconstructionModule(imsize=imsize, img_channel=3, batchnorm=batchnorm)            
-            else:
-                self.decoder = ConvReconstructionModule(imsize=imsize, img_channel=3, batchnorm=batchnorm)
-            
-            if loss == "L2":
-                self.reconstruction_criterion = nn.MSELoss(reduction="none")
-            if loss == "L1":
-                self.reconstruction_criterion = nn.L1Loss(reduction="none")
+        self.digit_caps = ClassCapsules(num_routes=num_primary_capsules*primary_caps_gridsize*primary_caps_gridsize, routing_iterations=routing_iterations, leaky=leaky_routing, in_channels=8)
+        if reconstruction_type == "FC":
+            self.decoder = ReconstructionModule(imsize=imsize, img_channel=3, batchnorm=batchnorm)
+        elif reconstruction_type == "Conv32":
+            self.decoder = SmallNorbConvReconstructionModule(imsize=imsize, img_channel=3, batchnorm=batchnorm)            
+        else:
+            self.decoder = ConvReconstructionModule(imsize=imsize, img_channel=3, batchnorm=batchnorm)
+        
+        if loss == "L2":
+            self.reconstruction_criterion = nn.MSELoss(reduction="none")
+        if loss == "L1":
+            self.reconstruction_criterion = nn.L1Loss(reduction="none")
             
 
     def loss(self, images, labels, capsule_output,  reconstruction, alpha):
-        marg_loss = 0 #self.margin_loss(capsule_output, labels)
+        marg_loss = self.margin_loss(capsule_output, labels)
         rec_loss = self.reconstruction_loss(images, reconstruction)
         total_loss = (marg_loss + alpha * rec_loss).mean()
-        return total_loss, rec_loss.mean(), marg_loss #.mean()
+        return total_loss, rec_loss.mean(), marg_loss.mean()
         
     def margin_loss(self, x, labels):
         batch_size = x.size(0)
