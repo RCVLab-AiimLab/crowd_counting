@@ -28,7 +28,7 @@ import pathlib
 path = pathlib.Path(__file__).parent.absolute()
 
 
-parser = argparse.ArgumentParser(description='PyTorch CSRNet')
+parser = argparse.ArgumentParser(description='RCVLab-AmiiLab Crowd counting')
 
 parser.add_argument('--train_json', metavar='TRAIN', default=path/'part_A_train.json', help='path to train json')
 parser.add_argument('--test_json', metavar='TEST', default=path/'part_A_val.json', help='path to test json')
@@ -128,7 +128,7 @@ def main():
         # Annealing alpha
         alpha = get_alpha(epoch)
         
-        train(train_list, val_list, model, criterion, optimizer, epoch, alpha, best_pred, CUDA)
+        train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA)
 
 def zeropad(img, h, w, target=False):
     if not target:
@@ -138,7 +138,7 @@ def zeropad(img, h, w, target=False):
         padded = cv2.copyMakeBorder(img, 0, h, 0, w, cv2.BORDER_CONSTANT, value=0)
     return padded
 
-def train(train_list, val_list, model, criterion, optimizer, epoch, alpha, best_pred, CUDA):
+def train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA):
     
     losses = AverageMeter()
     batch_time = AverageMeter()
@@ -228,10 +228,6 @@ def train(train_list, val_list, model, criterion, optimizer, epoch, alpha, best_
                     capsule_output, reconstruction, _ = model(img, target)
                     predictions = torch.norm(capsule_output.squeeze(), dim=2)
                     loss, rec_loss, marg_loss = model.loss(img, target, capsule_output, reconstruction, alpha)
-                    #loss_csr = criterion(output, target)
-                    #loss = (loss_caps + loss_csr).mean()
-
-                    #loss, margin_loss, reconstruction_loss = criterion(img, target, reconstruction, scores)
                     
                     losses.update(loss.item(), img.size(0))
 
@@ -257,7 +253,7 @@ def train(train_list, val_list, model, criterion, optimizer, epoch, alpha, best_
 
     tb_writer.add_scalar('train loss/epoch', losses.avg, epoch)
     ######
-    pred = validate(val_list, model, criterion, alpha, CUDA)
+    pred = validate(val_list, model, alpha, CUDA)
         
     is_best = pred < best_pred
     best_pred = min(pred, best_pred)
@@ -282,7 +278,7 @@ def get_alpha(epoch):
     return alpha
 
 
-def validate(val_list, model, criterion, alpha, CUDA):
+def validate(val_list, model, alpha, CUDA):
     print ('begin test')
     test_loader = torch.utils.data.DataLoader(dataset.listDataset(val_list, shuffle=False, transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), train=False, img_size=args.input_size), batch_size=args.batch_size)    
     
