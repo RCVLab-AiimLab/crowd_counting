@@ -165,13 +165,10 @@ def train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA)
     for bi, (img_big, target_big) in enumerate(train_loader):
         data_time.update(time.time() - end)
 
-        ###### clip-based training
-        ni = int(math.ceil(img_big.shape[2] / length))  # up-down
-        nj = int(math.ceil(img_big.shape[3] / length))  # left-right
+        ni = int(math.ceil(img_big.shape[2] / length)) 
+        nj = int(math.ceil(img_big.shape[3] / length))  
         for i in range(ni):  
-            #print('row %g/%g: ' % (i, ni-1), end='')
             for j in range(nj):  
-                #print('%g ' % j, end='', flush=True)
                 y2 = min((i + 1) * length, img_big.shape[2])
                 y1 = y2 - length
                 x2 = min((j + 1) * length, img_big.shape[3])
@@ -202,7 +199,6 @@ def train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA)
                     continue
                 target = torch.zeros(10)
                 target[int(count)] = 1
-                #target = target_chip.type(torch.FloatTensor).unsqueeze(0)
 
                 img = Variable(img_chip)
                 target = Variable(target)
@@ -218,8 +214,6 @@ def train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA)
                     if CUDA:
                         img = img.cuda()
                         target = target.cuda()
-                    
-                    #scores, reconstruction = model(img, target)
 
                     '''
                     if epoch <= 1:
@@ -252,7 +246,7 @@ def train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA)
                     b_num = 0
 
     tb_writer.add_scalar('train loss/epoch', losses.avg, epoch)
-    ######
+
     pred = validate(val_list, model, alpha, CUDA)
         
     is_best = pred < best_pred
@@ -289,13 +283,10 @@ def validate(val_list, model, alpha, CUDA):
     imgs, targets = [], []
     b_num = 0
     for bi, (img_big, target_big) in enumerate(test_loader):
-        ###### clip-based training
-        ni = int(math.ceil(img_big.shape[2] / length))  # up-down
-        nj = int(math.ceil(img_big.shape[3] / length))  # left-right
+        ni = int(math.ceil(img_big.shape[2] / length))  
+        nj = int(math.ceil(img_big.shape[3] / length)) 
         for i in range(ni):  
-            #print('row %g/%g: ' % (i, ni-1), end='')
             for j in range(nj):  
-                #print('%g ' % j, end='', flush=True)
                 y2 = min((i + 1) * length, img_big.shape[2])
                 y1 = y2 - length
                 x2 = min((j + 1) * length, img_big.shape[3])
@@ -316,7 +307,6 @@ def validate(val_list, model, alpha, CUDA):
                     continue
                 target = torch.zeros(10)
                 target[int(count)] = 1
-                #target = target_chip.type(torch.FloatTensor).unsqueeze(0)
 
                 img = Variable(img_chip)
                 target = Variable(target)
@@ -335,7 +325,7 @@ def validate(val_list, model, alpha, CUDA):
 
                     with torch.no_grad():
                         capsule_output, reconstruction, predictions = model(img, target)
-                        loss, rec_loss, marg_loss = model.loss(img, target, capsule_output, reconstruction, alpha)
+                        #loss, rec_loss, marg_loss = model.loss(img, target, capsule_output, reconstruction, alpha)
                         
                         predictions = np.argmax(predictions.cpu(), axis=1) 
                         target = np.argmax(target.cpu(), axis=1) 
