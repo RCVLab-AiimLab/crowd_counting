@@ -232,14 +232,14 @@ def train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA)
                     batch_time.update(time.time() - end)
                     end = time.time()
                     
-                    if i % args.print_freq == 0:
+                    if bi % args.print_freq == 0:
                         print('Epoch: [{0}][{1}/{2}]\t'
                             'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                             'Epoch Time {data_time.val:.3f} ({data_time.avg:.3f})\t'
                             'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                             .format(epoch, bi, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses))
                     
-                        tb_writer.add_scalar('train loss/iteration', losses.avg, epoch * len(train_loader.dataset) + i)
+                        #tb_writer.add_scalar('train loss/iteration', losses.avg, epoch * len(train_loader.dataset) + i)
 
                     imgs = []
                     targets = []
