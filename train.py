@@ -239,7 +239,7 @@ def train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA)
                             'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                             .format(epoch, bi, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses))
                     
-                        #tb_writer.add_scalar('train loss/iteration', losses.avg, epoch * len(train_loader.dataset) + i)
+                        #tb_writer.add_scalar('train loss/iteration', losses.avg, epoch * len(train_loader.dataset) + bi)
 
                     imgs = []
                     targets = []
