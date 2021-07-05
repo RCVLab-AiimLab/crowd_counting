@@ -7,32 +7,32 @@ import torch.nn.functional as F
 import numpy as np
 
 class CSRNet(nn.Module):
-    def __init__(self, depth=None, load_weights=False, reconstruction_type='FC', 
+    def __init__(self, depth=None, use_reconstruction=None, load_weights=False, reconstruction_type='FC', 
                     imsize=64, num_classes=10, routing_iterations=3, primary_caps_gridsize=6, img_channel=3, 
                     batchnorm=False, loss='L2', num_primary_capsules=32, leaky_routing=False):
         
         super(CSRNet, self).__init__()
         self.seen = 0
-        self.capsnet = self.make_layers(in_channels=self.frontend_feat[-1], primary_caps_gridsize=primary_caps_gridsize, imsize=imsize)
+
+        self.make_layers(in_channels=256, primary_caps_gridsize=primary_caps_gridsize, imsize=imsize)
+        self.use_reconstruction = use_reconstruction
+
+        '''
         self.output_layer = nn.Conv2d(64, 1, kernel_size=1)
-        self.use_reconstruction = True
         if not load_weights:
             mod = models.vgg16(pretrained=True)
             self._initialize_weights()
             for i in range(len(self.frontend.state_dict().items())):
                 list(self.frontend.state_dict().items())[i][1].data[:] = list(mod.state_dict().items())[i][1].data[:]
-
+        '''
     def forward(self, x, target=None):
-        self.input_shape = x.shape[1:]
-        #conv = self.frontend(x)
         conv = self.conv_layer(x)
         primary_capsules = self.primary_capsules(conv)
         digit_caps = self.digit_caps(primary_capsules)
         reconstruction, masked = self.decoder(digit_caps, target)
-
+        
         return digit_caps, reconstruction, masked
 
-        #return x
 
     def _initialize_weights(self):
         for m in self.modules():
@@ -44,10 +44,9 @@ class CSRNet(nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-    def make_layers(self, in_channels=3, batch_norm=False, kernel_size=3, dilation=False, imsize=64, 
+    def make_layers(self, csrnet_cfg=None, in_channels=3, batch_norm=False, kernel_size=3, dilation=False, imsize=64, 
                     img_channel=3, batchnorm=False, leaky_routing=False, primary_caps_gridsize=6,
-                    num_primary_capsules=32, routing_iterations=3, reconstruction_type='FC',
-                    loss='L2'):
+                    num_primary_capsules=32, routing_iterations=3, reconstruction_type='FC', loss='L2'):
         
         self.conv_layer = ConvLayer(in_channels=3, batchnorm=batchnorm)
         self.leaky_routing = leaky_routing
@@ -65,7 +64,7 @@ class CSRNet(nn.Module):
             self.reconstruction_criterion = nn.MSELoss(reduction="none")
         if loss == "L1":
             self.reconstruction_criterion = nn.L1Loss(reduction="none")
-            
+        
 
     def loss(self, images, labels, capsule_output,  reconstruction, alpha):
         marg_loss = self.margin_loss(capsule_output, labels)
@@ -91,7 +90,7 @@ class CSRNet(nn.Module):
         loss = self.reconstruction_criterion(reconstructions, data)
         loss = loss.sum(dim=1)
         return loss
-            
+
 
 # First Convolutional Layer
 class ConvLayer(nn.Module):
@@ -138,7 +137,6 @@ class PrimaryCapsules(nn.Module):
     
     return squash(output)     
     
-
 
 class ClassCapsules(nn.Module):
   
@@ -349,6 +347,7 @@ def routing_algorithm(x, weight, bias, routing_iterations):
     u_hat = torch.matmul(weight, x).squeeze() #weight => (128, 2048, 5, 16, 8)
 
     b_ij = Variable(x.new(batch_size, num_capsules_in, num_capsules_out, 1).zero_())
+
 
     for it in range(routing_iterations):
       c_ij = F.softmax(b_ij, dim=2)    #  c_ij, b_ij => (128, 2048, 5, 1)
