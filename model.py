@@ -81,6 +81,10 @@ class CSRNet(nn.Module):
             self.conv_layer = ConvLayer(in_channels=3, batchnorm=batchnorm)
             self.leaky_routing = leaky_routing
             self.primary_capsules = PrimaryCapsules(in_channels=in_channels, primary_caps_gridsize=primary_caps_gridsize, batchnorm=batchnorm, num_capsules=num_primary_capsules)
+            #self.primary_capsules = PrimaryCapsules(input_shape=(256, 20, 20), capsule_dim=8, out_channels=32, kernel_size=9, stride=2)
+            #self.routing = Routing(caps_dim_before=8, caps_dim_after=16, n_capsules_before=6*6*32, n_capsules_after=10, n_routing_iter=3)
+            #self.norm = Norm()
+            #self.decoder = Decoder(16, int(np.prod([3,32,32])))
 
             self.digit_caps = ClassCapsules(num_routes=num_primary_capsules*primary_caps_gridsize*primary_caps_gridsize, routing_iterations=routing_iterations, leaky=leaky_routing, in_channels=8)
             if reconstruction_type == "FC":
@@ -378,7 +382,6 @@ def routing_algorithm(x, weight, bias, routing_iterations):
     u_hat = torch.matmul(weight, x).squeeze() #weight => (128, 2048, 5, 16, 8)
 
     b_ij = Variable(x.new(batch_size, num_capsules_in, num_capsules_out, 1).zero_())
-
 
     for it in range(routing_iterations):
       c_ij = F.softmax(b_ij, dim=2)    #  c_ij, b_ij => (128, 2048, 5, 1)
