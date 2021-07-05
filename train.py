@@ -40,7 +40,6 @@ parser.add_argument('--checkpoint_path', metavar='CHECKPOINT', default='../runs/
 parser.add_argument('--log_dir', metavar='CHECKPOINT', default='../runs/log', type=str, help='log dir')
 
 parser.add_argument('--depth', metavar='DEPTH', default=False, type=bool, help='using depth?')
-parser.add_argument('--capsnet', metavar='CAPSNET', default=True, type=bool, help='using capsnet?')
 parser.add_argument('--input_size', metavar="input_size", default=256, type=int)
 
 parser.add_argument('--lr', metavar="learning_rate", default=0.001, type=float, help="learning rate")
@@ -99,21 +98,13 @@ def main():
     else:
         CUDA = False
 
-    if args.capsnet:
-        model = CSRNet(args.depth, args.capsnet, reconstruction_type=args.decoder, imsize=args.input_size//8, 
+    model = CSRNet(args.depth, reconstruction_type=args.decoder, imsize=args.input_size//8, 
                         routing_iterations=args.routing, primary_caps_gridsize=8,
                         img_channel=3, batchnorm=args.batch_norm, num_primary_capsules=32,
                         loss=args.loss, leaky_routing=args.leaky)
-    else:
-        model = CSRNet(args.depth, args.capsnet)
-    
-    criterion = nn.MSELoss(size_average=False)
-    #criterion = CapsNetLoss()
     
     if CUDA:
         model = model.cuda()
-        #criterion = CapsNetLoss().cuda()
-        criterion = nn.MSELoss(size_average=False).cuda()
 
     optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=args.momentum, weight_decay=args.decay)
 

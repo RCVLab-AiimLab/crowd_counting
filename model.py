@@ -7,23 +7,13 @@ import torch.nn.functional as F
 import numpy as np
 
 class CSRNet(nn.Module):
-    def __init__(self, depth=None, capsnet=None, load_weights=False, reconstruction_type='FC', 
+    def __init__(self, depth=None, load_weights=False, reconstruction_type='FC', 
                     imsize=64, num_classes=10, routing_iterations=3, primary_caps_gridsize=6, img_channel=3, 
                     batchnorm=False, loss='L2', num_primary_capsules=32, leaky_routing=False):
         
         super(CSRNet, self).__init__()
         self.seen = 0
-        self.frontend_feat = [64, 64, 128, 128, 256, 256, 256] #, 512, 512, 512]
-        #self.frontend_feat = [32, 32, 'M', 64, 64, 'M', 128, 128, 128, 'M', 256, 256, 256]
-        self.backend_feat  = [512, 512, 512, 256, 128, 64]
-        #self.backend_feat  = [256, 256, 256, 128, 64, 32]
-        self.frontend = self.make_layers(self.frontend_feat, in_channels=img_channel, kernel_size=3)
-        self.backend = self.make_layers(self.backend_feat, in_channels=self.frontend_feat[-1], dilation=True)
-        if depth:
-            ###### TODO
-            self.depth = self.make_layers()
-        if capsnet:
-            self.capsnet = self.make_layers(capsnet=capsnet, in_channels=self.frontend_feat[-1], primary_caps_gridsize=primary_caps_gridsize, imsize=imsize)
+        self.capsnet = self.make_layers(capsnet=capsnet, in_channels=self.frontend_feat[-1], primary_caps_gridsize=primary_caps_gridsize, imsize=imsize)
         self.output_layer = nn.Conv2d(64, 1, kernel_size=1)
         self.use_reconstruction = True
         if not load_weights:
