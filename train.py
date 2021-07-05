@@ -60,7 +60,7 @@ parser.add_argument('--leaky', default=False, action="store_true",  help="Turn o
 parser.add_argument('--model', default='model', help="Set model name")
 
 
-global args, best_prec1
+global args
 
 args = parser.parse_args()
 args.original_lr = args.lr # 1e-7
@@ -78,7 +78,7 @@ tb_writer = SummaryWriter(args.log_dir)
    
 def main():
     
-    best_prec1 = 1e6
+    best_pred = 1e6
     
     if not Path(args.checkpoint_path).exists():
         os.mkdir(args.checkpoint_path)
@@ -108,9 +108,11 @@ def main():
         model = CSRNet(args.depth, args.capsnet)
     
     criterion = nn.MSELoss(size_average=False)
+    #criterion = CapsNetLoss()
     
     if CUDA:
         model = model.cuda()
+        #criterion = CapsNetLoss().cuda()
         criterion = nn.MSELoss(size_average=False).cuda()
 
     optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=args.momentum, weight_decay=args.decay)
@@ -120,7 +122,7 @@ def main():
             print("=> loading checkpoint '{}'".format(args.pre))
             checkpoint = torch.load(args.pre)
             args.start_epoch = checkpoint['epoch']
-            best_prec1 = checkpoint['best_prec1']
+            best_pred = checkpoint['best_pred']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint '{}' (epoch {})"
@@ -131,19 +133,11 @@ def main():
     for epoch in range(args.start_epoch, args.epochs):
         
         adjust_learning_rate(optimizer, epoch)
+
+        # Annealing alpha
+        alpha = get_alpha(epoch)
         
-        train(train_list, model, criterion, optimizer, epoch, CUDA)
-        prec1 = validate(val_list, model, criterion)
-        
-        is_best = prec1 < best_prec1
-        best_prec1 = min(prec1, best_prec1)
-        print(' * best MAE {mae:.3f} '.format(mae=best_prec1))
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'arch': args.pre,
-            'state_dict': model.state_dict(),
-            'best_prec1': best_prec1,
-            'optimizer' : optimizer.state_dict(),}, is_best, args.checkpoint_path)
+        train(train_list, val_list, model, criterion, optimizer, epoch, alpha, best_pred, CUDA)
 
 def zeropad(img, h, w, target=False):
     if not target:
@@ -153,7 +147,7 @@ def zeropad(img, h, w, target=False):
         padded = cv2.copyMakeBorder(img, 0, h, 0, w, cv2.BORDER_CONSTANT, value=0)
     return padded
 
-def train(train_list, model, criterion, optimizer, epoch, CUDA):
+def train(train_list, val_list, model, criterion, optimizer, epoch, alpha, best_pred, CUDA):
     
     losses = AverageMeter()
     batch_time = AverageMeter()
@@ -174,29 +168,28 @@ def train(train_list, model, criterion, optimizer, epoch, CUDA):
     model.train()
     end = time.time()
 
-    # Annealing alpha
-    alpha = get_alpha(epoch)
-
-    length = 128
-    for i, (img, target) in enumerate(train_loader):
+    length = 32
+    imgs, targets = [], []
+    b_num = 0
+    for bi, (img_big, target_big) in enumerate(train_loader):
         data_time.update(time.time() - end)
 
         ###### clip-based training
-        ni = int(math.ceil(img.shape[2] / length))  # up-down
-        nj = int(math.ceil(img.shape[3] / length))  # left-right
+        ni = int(math.ceil(img_big.shape[2] / length))  # up-down
+        nj = int(math.ceil(img_big.shape[3] / length))  # left-right
         for i in range(ni):  
-            print('row %g/%g: ' % (i, ni-1), end='')
+            #print('row %g/%g: ' % (i, ni-1), end='')
             for j in range(nj):  
-                print('%g ' % j, end='', flush=True)
-                y2 = min((i + 1) * length, img.shape[2])
+                #print('%g ' % j, end='', flush=True)
+                y2 = min((i + 1) * length, img_big.shape[2])
                 y1 = y2 - length
-                x2 = min((j + 1) * length, img.shape[3])
+                x2 = min((j + 1) * length, img_big.shape[3])
                 x1 = x2 - length
 
-                img_chip = img[:, :, y1:y2, x1:x2]
+                img_chip = img_big[:, :, y1:y2, x1:x2]
                 img_chip = zeropad(img_chip.squeeze(0).permute(1,2,0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3])
                 img_chip = torch.from_numpy(img_chip).permute(2,0,1).unsqueeze(0)
-                target_chip = target[:, y1:y2, x1:x2]
+                target_chip = target_big[:, y1:y2, x1:x2]
                 target_chip = zeropad(target_chip.squeeze(0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3], target=True)
                 target_chip = torch.from_numpy(target_chip).unsqueeze(0)
                 assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
@@ -208,52 +201,82 @@ def train(train_list, model, criterion, optimizer, epoch, CUDA):
                 imtest = imtest.astype(np.uint8)
                 plt.subplot(121).imshow(imtest)
                 plt.subplot(122).imshow(target_chip.squeeze(0), cmap=CM.jet)
-                count = np.sum(target_chip.numpy().squeeze(0))# don't mind this slight variation
+                count = np.sum(target_chip.numpy().squeeze(0))
                 plt.title('People count: ' + str(count))
                 plt.show()
                 '''
-                
-                target = target_chip.type(torch.FloatTensor).unsqueeze(0)
+                count = np.sum(target_chip.numpy().squeeze(0))
+                count = np.round(count)
+                if count >= 10:
+                    continue
+                target = torch.zeros(10)
+                target[int(count)] = 1
+                #target = target_chip.type(torch.FloatTensor).unsqueeze(0)
 
                 img = Variable(img_chip)
                 target = Variable(target)
+                
+                imgs.append(img)
+                targets.append(target)
+                b_num += 1
 
-                if CUDA:
-                    img = img.cuda()
-                    target = target.cuda()
-                
-                x_csr_frontend, output, x_caps, reconstruction, _ = model(img)
+                if b_num >= 512:
+                    img = torch.stack(imgs, dim=0).squeeze(1)
+                    target = torch.stack(targets, dim=0)
 
-                '''
-                if epoch <= 1:
-                    tb_writer.add_graph(torch.jit.trace(model, img, strict=False), [])
-                '''
-                
-                loss_caps, rec_loss, marg_loss = model.loss(x_csr_frontend, target, x_caps, reconstruction, alpha)
-                
-                loss_csr = criterion(output, target)
+                    if CUDA:
+                        img = img.cuda()
+                        target = target.cuda()
+                    
+                    #scores, reconstruction = model(img, target)
 
-                loss = (loss_caps + loss_csr).mean()
+                    '''
+                    if epoch <= 1:
+                        tb_writer.add_graph(torch.jit.trace(model, img, strict=False), [])
+                    '''
+                    capsule_output, reconstruction, _ = model(img, target)
+                    predictions = torch.norm(capsule_output.squeeze(), dim=2)
+                    loss, rec_loss, marg_loss = model.loss(img, target, capsule_output, reconstruction, alpha)
+                    #loss_csr = criterion(output, target)
+                    #loss = (loss_caps + loss_csr).mean()
 
-                losses.update(loss.item(), img.size(0))
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()    
-                
-                batch_time.update(time.time() - end)
-                end = time.time()
-                
-                if i % args.print_freq == 0:
-                    print('Epoch: [{0}][{1}/{2}]\t'
-                        'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                        'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                        'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                        .format(epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses))
-                
-                    tb_writer.add_scalar('train loss/iteration', losses.avg, epoch * len(train_loader.dataset) + i)
+                    #loss, margin_loss, reconstruction_loss = criterion(img, target, reconstruction, scores)
+                    
+                    losses.update(loss.item(), img.size(0))
 
-            tb_writer.add_scalar('train loss/epoch', losses.avg, epoch)
-        ######
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()    
+                    
+                    batch_time.update(time.time() - end)
+                    end = time.time()
+                    
+                    if i % args.print_freq == 0:
+                        print('Epoch: [{0}][{1}/{2}]\t'
+                            'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                            'Epoch Time {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                            'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                            .format(epoch, bi, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses))
+                    
+                        tb_writer.add_scalar('train loss/iteration', losses.avg, epoch * len(train_loader.dataset) + i)
+
+                    imgs = []
+                    targets = []
+                    b_num = 0
+
+    tb_writer.add_scalar('train loss/epoch', losses.avg, epoch)
+    ######
+    pred = validate(val_list, model, criterion, alpha, CUDA)
+        
+    is_best = pred < best_pred
+    best_pred = min(pred, best_pred)
+    print(' * best MAE {mae:.3f} '.format(mae=best_pred))
+    save_checkpoint({
+        'epoch': epoch + 1,
+        'arch': args.pre,
+        'state_dict': model.state_dict(),
+        'best_pred': best_pred,
+        'optimizer' : optimizer.state_dict(),}, is_best, args.checkpoint_path)
 
 
 def get_alpha(epoch):
@@ -268,24 +291,75 @@ def get_alpha(epoch):
     return alpha
 
 
-def validate(val_list, model, criterion):
+def validate(val_list, model, criterion, alpha, CUDA):
     print ('begin test')
     test_loader = torch.utils.data.DataLoader(dataset.listDataset(val_list, shuffle=False, transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), train=False, img_size=args.input_size), batch_size=args.batch_size)    
     
     model.eval()
     
     mae = 0
-    
-    for i,(img, target) in enumerate(test_loader):
-        img = img.cuda()
-        img = Variable(img)
-        output = model(img)
-        
-        mae += abs(output.data.sum()-target.sum().type(torch.FloatTensor).cuda())
+    length = 32
+    imgs, targets = [], []
+    b_num = 0
+    for bi, (img_big, target_big) in enumerate(test_loader):
+        ###### clip-based training
+        ni = int(math.ceil(img_big.shape[2] / length))  # up-down
+        nj = int(math.ceil(img_big.shape[3] / length))  # left-right
+        for i in range(ni):  
+            #print('row %g/%g: ' % (i, ni-1), end='')
+            for j in range(nj):  
+                #print('%g ' % j, end='', flush=True)
+                y2 = min((i + 1) * length, img_big.shape[2])
+                y1 = y2 - length
+                x2 = min((j + 1) * length, img_big.shape[3])
+                x1 = x2 - length
+
+                img_chip = img_big[:, :, y1:y2, x1:x2]
+                img_chip = zeropad(img_chip.squeeze(0).permute(1,2,0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3])
+                img_chip = torch.from_numpy(img_chip).permute(2,0,1).unsqueeze(0)
+                target_chip = target_big[:, y1:y2, x1:x2]
+                target_chip = zeropad(target_chip.squeeze(0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3], target=True)
+                target_chip = torch.from_numpy(target_chip).unsqueeze(0)
+                assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
+                assert target_chip.shape[1] == target_chip.shape[2] == length, 'target size error'
+
+                count = np.sum(target_chip.numpy().squeeze(0))
+                count = np.round(count)
+                if count >= 10:
+                    continue
+                target = torch.zeros(10)
+                target[int(count)] = 1
+                #target = target_chip.type(torch.FloatTensor).unsqueeze(0)
+
+                img = Variable(img_chip)
+                target = Variable(target)
+                
+                imgs.append(img)
+                targets.append(target)
+                b_num += 1
+
+                if i == (ni-1) and j == (nj-1):
+                    img = torch.stack(imgs, dim=0).squeeze(1)
+                    target = torch.stack(targets, dim=0)
+
+                    if CUDA:
+                        img = img.cuda()
+                        target = target.cuda()
+
+                    with torch.no_grad():
+                        capsule_output, reconstruction, predictions = model(img, target)
+                        loss, rec_loss, marg_loss = model.loss(img, target, capsule_output, reconstruction, alpha)
+                        
+                        predictions = np.argmax(predictions.cpu(), axis=1) 
+                        target = np.argmax(target.cpu(), axis=1) 
+                        mae += abs(predictions.data.sum()-target.sum().type(torch.FloatTensor).cuda())
+                        
+                        imgs = []
+                        targets = []
+                        b_num = 0
         
     mae = mae/len(test_loader)    
-    print(' * MAE {mae:.3f} '
-              .format(mae=mae))
+    print(' * MAE {mae:.3f} '.format(mae=mae))
 
     return mae    
         

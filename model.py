@@ -25,6 +25,7 @@ class CSRNet(nn.Module):
         if capsnet:
             self.capsnet = self.make_layers(capsnet=capsnet, in_channels=self.frontend_feat[-1], primary_caps_gridsize=primary_caps_gridsize, imsize=imsize)
         self.output_layer = nn.Conv2d(64, 1, kernel_size=1)
+        self.use_reconstruction = True
         if not load_weights:
             mod = models.vgg16(pretrained=True)
             self._initialize_weights()
@@ -32,16 +33,14 @@ class CSRNet(nn.Module):
                 list(self.frontend.state_dict().items())[i][1].data[:] = list(mod.state_dict().items())[i][1].data[:]
 
     def forward(self, x, target=None):
-        conv = self.frontend(x)
-        #x = self.conv_layer(x)
+        self.input_shape = x.shape[1:]
+        #conv = self.frontend(x)
+        conv = self.conv_layer(x)
         primary_capsules = self.primary_capsules(conv)
-        digit_caps = self.routing(primary_capsules)
-        #x = self.digit_caps(x)
-        #reconstruction, masked = self.decoder(x, target)
-        #x_csr = self.backend(reconstruction)
-        #x_csr = self.output_layer(x_csr)
+        digit_caps = self.digit_caps(primary_capsules)
+        reconstruction, masked = self.decoder(digit_caps, target)
 
-        return x_csr_frontend, x_csr, x_caps, reconstruction, masked
+        return digit_caps, reconstruction, masked
 
         #return x
 
@@ -79,24 +78,23 @@ class CSRNet(nn.Module):
             return nn.Sequential(*layers) 
 
         elif capsnet:  
-            #self.conv_layer = ConvLayer(in_channels=in_channels, batchnorm=batchnorm)
-            #self.leaky_routing = leaky_routing
-            #self.primary_capsules = PrimaryCapsules(in_channels=in_channels, primary_caps_gridsize=primary_caps_gridsize, batchnorm=batchnorm, num_capsules=num_primary_capsules)
-            self.primary_capsules = PrimaryCapsules(input_shape=(256, 20, 20), capsule_dim=8, out_channels=32, kernel_size=9, stride=2)
-            self.routing = Routing(caps_dim_before=8, caps_dim_after=16, n_capsules_before=6 * 6 * 32, n_capsules_after=10, n_routing_iter=3)
-            #self.digit_caps = ClassCapsules(num_routes=num_primary_capsules*primary_caps_gridsize*primary_caps_gridsize, routing_iterations=routing_iterations, leaky=leaky_routing, in_channels=8)
+            self.conv_layer = ConvLayer(in_channels=3, batchnorm=batchnorm)
+            self.leaky_routing = leaky_routing
+            self.primary_capsules = PrimaryCapsules(in_channels=in_channels, primary_caps_gridsize=primary_caps_gridsize, batchnorm=batchnorm, num_capsules=num_primary_capsules)
 
+            self.digit_caps = ClassCapsules(num_routes=num_primary_capsules*primary_caps_gridsize*primary_caps_gridsize, routing_iterations=routing_iterations, leaky=leaky_routing, in_channels=8)
             if reconstruction_type == "FC":
-                self.decoder = ReconstructionModule(imsize=imsize, img_channel=self.frontend_feat[-1], batchnorm=batchnorm)
+                self.decoder = ReconstructionModule(imsize=imsize, img_channel=3, batchnorm=batchnorm)
             elif reconstruction_type == "Conv32":
-                self.decoder = SmallNorbConvReconstructionModule(imsize=imsize, img_channel=self.frontend_feat[-1], batchnorm=batchnorm)            
+                self.decoder = SmallNorbConvReconstructionModule(imsize=imsize, img_channel=3, batchnorm=batchnorm)            
             else:
-                self.decoder = ConvReconstructionModule(imsize=imsize, img_channel=self.frontend_feat[-1], batchnorm=batchnorm)
+                self.decoder = ConvReconstructionModule(imsize=imsize, img_channel=3, batchnorm=batchnorm)
             
             if loss == "L2":
                 self.reconstruction_criterion = nn.MSELoss(reduction="none")
             if loss == "L1":
                 self.reconstruction_criterion = nn.L1Loss(reduction="none")
+            
 
     def loss(self, images, labels, capsule_output,  reconstruction, alpha):
         marg_loss = 0 #self.margin_loss(capsule_output, labels)
@@ -123,7 +121,6 @@ class CSRNet(nn.Module):
         loss = loss.sum(dim=1)
         return loss
             
-                
 
 # First Convolutional Layer
 class ConvLayer(nn.Module):
@@ -144,92 +141,7 @@ class ConvLayer(nn.Module):
     output = self.conv(x)
     return output
 
-class PrimaryCapsules(torch.nn.Module):
-    def __init__(self, input_shape=(256, 20, 20), capsule_dim=8, out_channels=32, kernel_size=9, stride=2):
-        super(PrimaryCapsules, self).__init__()
-        self.input_shape = input_shape
-        self.capsule_dim = capsule_dim
-        self.out_channels = out_channels
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.in_channels = self.input_shape[0]
-        
-        self.conv = torch.nn.Conv2d(
-            self.in_channels,
-            self.out_channels * self.capsule_dim,
-            self.kernel_size,
-            self.stride
-        )
-    
-    def forward(self, x):
-        x = self.conv(x)
-        x = x.permute(0, 2, 3, 1).contiguous()
-        x = x.view(-1, x.size()[1], x.size()[2], self.out_channels, self.capsule_dim)
-        return x
 
-    
-
-class Routing(torch.nn.Module):
-    def __init__(self, caps_dim_before=8, caps_dim_after=16, n_capsules_before=(6 * 6 * 32), n_capsules_after=10, n_routing_iter=3):
-        super(Routing, self).__init__()
-        self.n_capsules_before = n_capsules_before
-        self.n_capsules_after = n_capsules_after
-        self.caps_dim_before = caps_dim_before
-        self.caps_dim_after = caps_dim_after
-        self.n_routing_iter = n_routing_iter
-        
-        # Parameter initialization not specified in the paper
-        n_in = self.n_capsules_before * self.caps_dim_before
-        variance = 2 / (n_in)
-        std = np.sqrt(variance)
-        self.n_capsules_before = 60*60*32
-        self.W = torch.nn.Parameter(
-            torch.randn(
-                self.n_capsules_before,
-                self.n_capsules_after,
-                self.caps_dim_after,
-                self.caps_dim_before) * std,
-            requires_grad=True)
-    
-    # Equation (1)
-    @staticmethod
-    def squash(s):
-        s_norm = torch.norm(s, p=2, dim=-1, keepdim=True)
-        s_norm2 = torch.pow(s_norm, 2)
-        v = (s_norm2 / (1.0 + s_norm2)) * (s / s_norm)
-        return v
-    
-    # Equation (2)
-    def affine(self, x):
-        x = self.W @ x.unsqueeze(2).expand(-1, -1, 10, -1).unsqueeze(-1)
-        return x.squeeze()
-    
-    # Equation (3)
-    @staticmethod
-    def softmax(x, dim=-1):
-        exp = torch.exp(x)
-        return exp / torch.sum(exp, dim, keepdim=True)
-    
-    # Procedure 1 - Routing algorithm.
-    def routing(self, u, r, l):
-        b = Variable(torch.zeros(u.size()[0], l[0], l[1]), requires_grad=False).cuda() # torch.Size([?, 1152, 10])
-        
-        for iteration in range(r):
-            c = Routing.softmax(b) # torch.Size([?, 1152, 10])
-            s = (c.unsqueeze(-1).expand(-1, -1, -1, u.size()[-1]) * u).sum(1) # torch.Size([?, 1152, 16])
-            v = Routing.squash(s) # torch.Size([?, 10, 16])
-            b += (u * v.unsqueeze(1).expand(-1, l[0], -1, -1)).sum(-1)
-        return v
-    
-    def forward(self, x):
-        self.n_capsules_before = 60*60*32
-        x = x.view((-1, self.n_capsules_before, self.caps_dim_before))
-        x = self.affine(x) # torch.Size([?, 1152, 10, 16])
-        x = self.routing(x, self.n_routing_iter, (self.n_capsules_before, self.n_capsules_after))
-        return x
-
-
-'''
 class PrimaryCapsules(nn.Module):
   def __init__(self, num_capsules=32, in_channels=256, out_channels=8, kernel_size=9, primary_caps_gridsize=6, batchnorm=False):
 
@@ -254,7 +166,7 @@ class PrimaryCapsules(nn.Module):
     output = output.view(x.size(0), self.num_capsules*(self.gridsize)*(self.gridsize), -1)
     
     return squash(output)     
-    ''' 
+    
 
 
 class ClassCapsules(nn.Module):
@@ -278,7 +190,7 @@ class ClassCapsules(nn.Module):
 
 
 class ReconstructionModule(nn.Module):
-  def __init__(self, capsule_size=16, num_capsules=10, imsize=64,img_channel=1, batchnorm=False):
+  def __init__(self, capsule_size=16, num_capsules=10, imsize=64, img_channel=1, batchnorm=False):
     super(ReconstructionModule, self).__init__()
     
     self.num_capsules = num_capsules
@@ -326,7 +238,7 @@ class ReconstructionModule(nn.Module):
     return reconstructions, masked
 
 class ConvReconstructionModule(nn.Module):
-  def __init__(self, num_capsules=10, capsule_size=16, imsize=64,img_channel=1, batchnorm=False):
+  def __init__(self, num_capsules=10, capsule_size=16, imsize=64, img_channel=1, batchnorm=False):
     super(ConvReconstructionModule, self).__init__()
     self.num_capsules = num_capsules
     self.capsule_size = capsule_size
@@ -349,7 +261,7 @@ class ConvReconstructionModule(nn.Module):
           nn.Sigmoid())
     else:
         self.FC = nn.Sequential(
-            nn.Linear(capsule_size * num_capsules, num_capsules *(self.grid_size**2) ),
+            nn.Linear(capsule_size * num_capsules, num_capsules *(self.grid_size**2)),
             nn.ReLU())
         self.decoder = nn.Sequential(
           nn.ConvTranspose2d(in_channels=self.num_capsules, out_channels=32, kernel_size=9, stride=2),
@@ -380,7 +292,7 @@ class ConvReconstructionModule(nn.Module):
 
 
 class SmallNorbConvReconstructionModule(nn.Module):
-  def __init__(self, num_capsules=10, capsule_size=16, imsize=64,img_channel=1, batchnorm=False):
+  def __init__(self, num_capsules=10, capsule_size=16, imsize=64, img_channel=1, batchnorm=False):
     super(SmallNorbConvReconstructionModule, self).__init__()
     self.num_capsules = num_capsules
     self.capsule_size = capsule_size
@@ -453,8 +365,8 @@ def squash(x, dim=-1):
 def routing_algorithm(x, weight, bias, routing_iterations):
     """
     x: [batch_size, num_capsules_in, capsule_dim]
-    weight: [1,num_capsules_in,num_capsules_out,out_channels,in_channels]
-    bias: [1,1, num_capsules_out, out_channels]
+    weight: [1, num_capsules_in, num_capsules_out, out_channels, in_channels]
+    bias: [1, 1, num_capsules_out, out_channels]
     """
     num_capsules_in = x.shape[1]
     num_capsules_out = weight.shape[2]
