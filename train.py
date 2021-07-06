@@ -33,7 +33,7 @@ parser = argparse.ArgumentParser(description='RCVLab-AmiiLab Crowd counting')
 parser.add_argument('--train_json', metavar='TRAIN', default=path/'part_A_train.json', help='path to train json')
 parser.add_argument('--test_json', metavar='TEST', default=path/'part_A_val.json', help='path to test json')
 parser.add_argument('--pre', '-p', metavar='PRETRAINED', default='../runs/weights/checkpoint.pth.tar', type=str, help='path to the pretrained model')
-parser.add_argument('--use_pre', metavar='USEPRETRAINED', default=False, type=bool, help='use the pretrained model?')
+parser.add_argument('--use_pre', metavar='USEPRETRAINED', default=True, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--gpu_id', metavar='GPU_ID', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', metavar='CHECKPOINT', default='../runs/weights', type=str, help='checkpoint path')
@@ -253,7 +253,7 @@ def train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA)
     best_pred = min(pred, best_pred)
     print(' * best MAE {mae:.3f} '.format(mae=best_pred))
     save_checkpoint({
-        'epoch': epoch + 1,
+        'epoch': epoch,
         'arch': args.pre,
         'state_dict': model.state_dict(),
         'best_pred': best_pred,
@@ -308,8 +308,8 @@ def validate(val_list, model, alpha, CUDA):
                 target = torch.zeros(10)
                 target[int(count)] = 1
 
-                img = Variable(img_chip)
-                target = Variable(target)
+                img = torch.clone(img_chip)
+                target = torch.clone(target)
                 
                 imgs.append(img)
                 targets.append(target)
@@ -324,12 +324,13 @@ def validate(val_list, model, alpha, CUDA):
                         target = target.cuda()
 
                     with torch.no_grad():
-                        capsule_output, reconstruction, predictions = model(img, target)
+                        capsule_output, reconstruction, predictions = model(img)
                         #loss, rec_loss, marg_loss = model.loss(img, target, capsule_output, reconstruction, alpha)
                         
                         predictions = np.argmax(predictions.cpu(), axis=1) 
                         target = np.argmax(target.cpu(), axis=1) 
-                        mae += abs(predictions.data.sum()-target.sum().type(torch.FloatTensor).cuda())
+                        
+                        mae += abs(predictions.data.sum() - target.sum().type(torch.FloatTensor).cuda())
                         
                         imgs = []
                         targets = []
