@@ -56,6 +56,7 @@ sum_mae = 0
 length = 32
 imgs, targets = [], []
 b_num = 0
+dataset_length = len(img_paths)
 for bi in range(len(img_paths)):
     img_big = 255.0 * F.to_tensor(Image.open(img_paths[bi]).convert('RGB'))
 
@@ -95,19 +96,11 @@ for bi in range(len(img_paths)):
             plt.title('People count: ' + str(count))
             plt.show()
             '''
-            '''
-            count = np.sum(target_chip.numpy().squeeze(0))
-            count = np.round(count)
-            if count >= 10:
-                continue
-            target = torch.zeros(10)
-            target[int(count)] = 1
-            '''
-
             count = np.sum(target_chip.numpy())
             count = np.round(count)
             if count >= 10:
-                continue
+                #continue
+                count = 9
             target = torch.zeros(10)
             target[int(count)] = 1
 
@@ -119,6 +112,12 @@ for bi in range(len(img_paths)):
             b_num += 1
 
             if i == (ni-1) and j == (nj-1):
+                if b_num > 800:
+                    dataset_length -= 1
+                    imgs = []
+                    targets = []
+                    b_num = 0
+                    continue
                 img = torch.stack(imgs, dim=0).squeeze(1)
                 target = torch.stack(targets, dim=0)
 
@@ -130,7 +129,7 @@ for bi in range(len(img_paths)):
                     _, _, predictions = model(img)
                     predictions = np.argmax(predictions.cpu(), axis=1) 
                     target = np.argmax(target.cpu(), axis=1) 
-        
+
                     mae = abs(predictions.detach().cpu().sum().numpy() - np.sum(groundtruth))
                     sum_mae += mae
                     print(bi, mae)
@@ -138,4 +137,4 @@ for bi in range(len(img_paths)):
                     targets = []
                     b_num = 0
     
-print(sum_mae/len(img_paths))
+print(sum_mae/dataset_length)

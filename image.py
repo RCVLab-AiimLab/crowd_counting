@@ -7,7 +7,7 @@ from PIL import ImageStat
 import cv2
 
 def load_data(img_path, train=True, img_size=512):
-    gt_path = img_path.replace('.jpg','.h5').replace('images','ground_truth')
+    gt_path = img_path.replace('.jpg','_nofilter.h5').replace('images','ground_truth')
     img = Image.open(img_path).convert('RGB')
     #######
     #img = img.resize((img_size, img_size), Image.ANTIALIAS)

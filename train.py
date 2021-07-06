@@ -30,10 +30,10 @@ path = pathlib.Path(__file__).parent.absolute()
 
 parser = argparse.ArgumentParser(description='RCVLab-AmiiLab Crowd counting')
 
-parser.add_argument('--train_json', metavar='TRAIN', default=path/'part_A_train.json', help='path to train json')
-parser.add_argument('--test_json', metavar='TEST', default=path/'part_A_val.json', help='path to test json')
+parser.add_argument('--train_json', metavar='TRAIN', default=path/'part_B_train.json', help='path to train json')
+parser.add_argument('--test_json', metavar='TEST', default=path/'part_B_val.json', help='path to test json')
 parser.add_argument('--pre', '-p', metavar='PRETRAINED', default='../runs/weights/checkpoint.pth.tar', type=str, help='path to the pretrained model')
-parser.add_argument('--use_pre', metavar='USEPRETRAINED', default=True, type=bool, help='use the pretrained model?')
+parser.add_argument('--use_pre', metavar='USEPRETRAINED', default=False, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--gpu_id', metavar='GPU_ID', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', metavar='CHECKPOINT', default='../runs/weights', type=str, help='checkpoint path')
@@ -42,21 +42,20 @@ parser.add_argument('--log_dir', metavar='CHECKPOINT', default='../runs/log', ty
 parser.add_argument('--depth', metavar='DEPTH', default=False, type=bool, help='using depth?')
 parser.add_argument('--input_size', metavar="input_size", default=256, type=int)
 
-parser.add_argument('--lr', metavar="learning_rate", default=0.001, type=float, help="learning rate")
+parser.add_argument('--lr', metavar="learning_rate", default=0.00001, type=float, help="0.001, learning rate")
 parser.add_argument('--decoder', metavar="decoder", default='FC', help="Decoder structure 'FC' or 'Conv'")
 parser.add_argument('--batch_size', metavar="batch_size", default=1, type=int)
 parser.add_argument('--epochs', metavar="epochs", default=300, type=int, help="Number of epochs to train for")
 parser.add_argument('--file', metavar="filepath", default="", type=str, help="Name of the model to be loaded")
 parser.add_argument('--save_images', default=True, action="store_false", help="Set if you want to save reconstruction results each epoch")
 parser.add_argument('--alpha', default=0.0005, type=float, help="Alpha constant from paper (Amount of reconstruction loss)")
-parser.add_argument('--dataset', default='shanghai', help="Set wanted dataset. Options: [mnist, small_norb,cifar10]")
+parser.add_argument('--dataset', default='shanghai', help="dataset name")
 parser.add_argument('--routing', metavar="routing_iterations", default=3, type=int, help="Number of routing iterations to use")
-parser.add_argument('--logfile', metavar="log_filepath", default="", type=str, help="Path to previous logfile if continuing training")
 parser.add_argument('--batch_norm', default=False, type=int, help="Turn on/off batch norm in encoder/decoder")
 parser.add_argument('--loss', metavar="loss_type", default="L2", help="Define reconstruction loss. Types: [L1, L2]")
 parser.add_argument('--anneal_alpha', default="none", help="Set annealing function for alpha. Options: [none, 1, 2]")
 parser.add_argument('--leaky', default=False, action="store_true",  help="Turn on/off leaky routing (Add orphan class for reconstruction)")
-parser.add_argument('--model', default='model', help="Set model name")
+parser.add_argument('--model_desc', default='partB_nofilter_10 classes, lr=1e-5/', help="Set model description")
 
 
 global args
@@ -73,6 +72,7 @@ args.workers = 4
 args.seed = time.time()
 args.print_freq = 1
 
+args.log_dir += ('/'+args.model_desc)
 tb_writer = SummaryWriter(args.log_dir)
    
 def main():
@@ -112,7 +112,7 @@ def main():
         if os.path.isfile(args.pre):
             print("=> loading checkpoint '{}'".format(args.pre))
             checkpoint = torch.load(args.pre)
-            args.start_epoch = checkpoint['epoch']
+            args.start_epoch = checkpoint['epoch']+1
             best_pred = checkpoint['best_pred']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
@@ -196,7 +196,8 @@ def train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA)
                 count = np.sum(target_chip.numpy().squeeze(0))
                 count = np.round(count)
                 if count >= 10:
-                    continue
+                    #continue
+                    count = 9
                 target = torch.zeros(10)
                 target[int(count)] = 1
 
@@ -207,7 +208,7 @@ def train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA)
                 targets.append(target)
                 b_num += 1
 
-                if b_num >= 512:
+                if b_num >= 256:
                     img = torch.stack(imgs, dim=0).squeeze(1)
                     target = torch.stack(targets, dim=0)
 
@@ -245,9 +246,7 @@ def train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA)
                     targets = []
                     b_num = 0
 
-    tb_writer.add_scalar('train loss/epoch', losses.avg, epoch)
-
-    pred = validate(val_list, model, alpha, CUDA)
+    pred, val_losses = validate(val_list, model, alpha, CUDA)
         
     is_best = pred < best_pred
     best_pred = min(pred, best_pred)
@@ -258,6 +257,11 @@ def train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA)
         'state_dict': model.state_dict(),
         'best_pred': best_pred,
         'optimizer' : optimizer.state_dict(),}, is_best, args.checkpoint_path)
+    
+    tb_writer.add_scalar('train loss/epoch', losses.avg, epoch)
+    tb_writer.add_scalar('val loss/epoch', val_losses.avg, epoch)
+    tb_writer.add_scalar('MAE/epoch', pred, epoch)
+
 
 
 def get_alpha(epoch):
@@ -278,6 +282,7 @@ def validate(val_list, model, alpha, CUDA):
     
     model.eval()
     
+    losses = AverageMeter()
     mae = 0
     length = 32
     imgs, targets = [], []
@@ -304,7 +309,8 @@ def validate(val_list, model, alpha, CUDA):
                 count = np.sum(target_chip.numpy().squeeze(0))
                 count = np.round(count)
                 if count >= 10:
-                    continue
+                    #continue
+                    count = 9
                 target = torch.zeros(10)
                 target[int(count)] = 1
 
@@ -325,7 +331,9 @@ def validate(val_list, model, alpha, CUDA):
 
                     with torch.no_grad():
                         capsule_output, reconstruction, predictions = model(img)
-                        #loss, rec_loss, marg_loss = model.loss(img, target, capsule_output, reconstruction, alpha)
+                        loss, rec_loss, marg_loss = model.loss(img, target, capsule_output, reconstruction, alpha)
+
+                        losses.update(loss.item(), img.size(0))
                         
                         predictions = np.argmax(predictions.cpu(), axis=1) 
                         target = np.argmax(target.cpu(), axis=1) 
@@ -339,7 +347,7 @@ def validate(val_list, model, alpha, CUDA):
     mae = mae/len(test_loader)    
     print(' * MAE {mae:.3f} '.format(mae=mae))
 
-    return mae    
+    return mae, losses    
         
 def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
