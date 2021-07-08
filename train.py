@@ -1,7 +1,6 @@
 import os
 import argparse
 import time
-from pathlib import Path
 import json
 import numpy as np
 import torch
@@ -24,8 +23,7 @@ parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 parser.add_argument('--model_desc', default='shanghaiB, darknet, lr=1e-3/', help="Set model description")
 parser.add_argument('--train_json', default=path/'datasets/shanghai/part_B_train.json', help='path to train json')
 parser.add_argument('--val_json', default=path/'datasets/shanghai/part_B_val.json', help='path to test json')
-parser.add_argument('--pre', '-p', default='../runs/weights/checkpoint.pth.tar', type=str, help='path to the pretrained model')
-parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
+parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
@@ -44,7 +42,7 @@ parser.add_argument('--epochs', default=300, type=int, help="Number of epochs to
 parser.add_argument('--workers', default=4, type=int, help="Number of workers in loading dataset")
 parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
-parser.add_argument('--lr0', default=0.001, type=float, help="initial learning rate")
+parser.add_argument('--lr0', default=0.0001, type=float, help="initial learning rate")
 parser.add_argument('--weight_decay', default=0.0005, type=float, help="weight_decay")
 parser.add_argument('--momentum', default=0.937, type=float, help="momentum")
 parser.add_argument('--adam', default=False, type=bool, help='use torch.optim.Adam() optimizer') 
@@ -157,7 +155,7 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
         
         save_checkpoint({
             'epoch': epoch,
-            'arch': args.pre,
+            'arch': args.checkpoint_path,
             'state_dict': model.state_dict(),
             'best_pred': args.best_pred,
             'optimizer' : optimizer.state_dict(),}, is_best, args.checkpoint_path)
@@ -256,7 +254,7 @@ def main():
     tb_writer = SummaryWriter(args.log_dir)
 
     args.checkpoint_path += ('/'+args.model_desc)
-    if not Path(args.checkpoint_path).exists():
+    if not pathlib.Path(args.checkpoint_path).exists():
         os.mkdir(args.checkpoint_path)
     args.checkpoint_path += 'checkpoint.pth.tar'
 
@@ -299,17 +297,17 @@ def main():
     optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
     del pg0, pg1, pg2
 
-    if args.pre and args.use_pre:
-        if os.path.isfile(args.pre):
-            print("=> loading checkpoint '{}'".format(args.pre))
-            checkpoint = torch.load(args.pre)
+    if args.use_pre:
+        if os.path.isfile(args.checkpoint_path):
+            print("=> loading checkpoint '{}'".format(args.checkpoint_path))
+            checkpoint = torch.load(args.checkpoint_path)
             args.start_epoch = checkpoint['epoch']+1
             args.best_pred = checkpoint['best_pred']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})".format(args.pre, checkpoint['epoch']))
+            print("=> loaded checkpoint '{}' (epoch {})".format(args.checkpoint_path, checkpoint['epoch']))
         else:
-            print("=> no checkpoint found at '{}'".format(args.pre))
+            print("=> no checkpoint found at '{}'".format(args.checkpoint_path))
 
 
     train(args, model, optimizer, train_list, val_list, tb_writer, CUDA) 
