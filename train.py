@@ -35,6 +35,7 @@ parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for
 # MODEL
 parser.add_argument('--model_file', default='model.yaml')
 parser.add_argument('--cell_size', default=64, type=int, help="cell size")
+parser.add_argument('--threshold', default=0.9, type=int, help="threshold for the classification output")
 
 
 # TRAINING
@@ -229,7 +230,7 @@ def validate(args, val_list, model, CUDA, compute_loss):
                         loss, _ = compute_loss(pred, targets)  # loss scaled by batch_size
 
                         losses.update(loss.item(), imgs.size(0))
-                        pred = pred > 0.9
+                        pred = pred > args.threshold
                         pred = pred.sum()
 
                         targets = targets.shape[0]
