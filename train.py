@@ -1,293 +1,192 @@
-import sys
 import os
-
-import warnings
-
-from model import CSRNet
-
-from utils import save_checkpoint
-
-import torch
-import torch.nn as nn
-from torch.autograd import Variable
-from torchvision import datasets, transforms
-from torch.utils.tensorboard import SummaryWriter
-
-import numpy as np
 import argparse
-import json
-import cv2
-import dataset
 import time
 from pathlib import Path
-import matplotlib.pyplot as plt
-from matplotlib import cm as CM
-import math
-
+import json
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
+from torchvision import datasets, transforms
+from torch.autograd import Variable
 import pathlib
+from model import Model, ComputeLoss
+from dataset import listDataset
+from tqdm import tqdm
+import math
+from utils import save_checkpoint, AverageMeter, vis_input, zeropad
+
+
 path = pathlib.Path(__file__).parent.absolute()
+parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-
-parser = argparse.ArgumentParser(description='RCVLab-AmiiLab Crowd counting')
-
-parser.add_argument('--train_json', metavar='TRAIN', default=path/'part_B_train.json', help='path to train json')
-parser.add_argument('--test_json', metavar='TEST', default=path/'part_B_val.json', help='path to test json')
-parser.add_argument('--pre', '-p', metavar='PRETRAINED', default='../runs/weights/checkpoint.pth.tar', type=str, help='path to the pretrained model')
-parser.add_argument('--use_pre', metavar='USEPRETRAINED', default=False, type=bool, help='use the pretrained model?')
+# GENERAL
+parser.add_argument('--model_desc', default='shanghaiB, darknet, lr=1e-3/', help="Set model description")
+parser.add_argument('--train_json', default=path/'datasets/shanghai/part_B_train.json', help='path to train json')
+parser.add_argument('--val_json', default=path/'datasets/shanghai/part_B_val.json', help='path to test json')
+parser.add_argument('--pre', '-p', default='../runs/weights/checkpoint.pth.tar', type=str, help='path to the pretrained model')
+parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
-parser.add_argument('--gpu_id', metavar='GPU_ID', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', metavar='CHECKPOINT', default='../runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', metavar='CHECKPOINT', default='../runs/log', type=str, help='log dir')
+parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
+parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
+parser.add_argument('--log_dir', default='../runs/log', type=str, help='log dir')
+parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
 
-parser.add_argument('--depth', metavar='DEPTH', default=False, type=bool, help='using depth?')
-parser.add_argument('--input_size', metavar="input_size", default=256, type=int)
-
-parser.add_argument('--lr', metavar="learning_rate", default=0.00001, type=float, help="0.001, learning rate")
-parser.add_argument('--decoder', metavar="decoder", default='FC', help="Decoder structure 'FC' or 'Conv'")
-parser.add_argument('--batch_size', metavar="batch_size", default=1, type=int)
-parser.add_argument('--epochs', metavar="epochs", default=300, type=int, help="Number of epochs to train for")
-parser.add_argument('--file', metavar="filepath", default="", type=str, help="Name of the model to be loaded")
-parser.add_argument('--save_images', default=True, action="store_false", help="Set if you want to save reconstruction results each epoch")
-parser.add_argument('--alpha', default=0.0005, type=float, help="Alpha constant from paper (Amount of reconstruction loss)")
-parser.add_argument('--dataset', default='shanghai', help="dataset name")
-parser.add_argument('--routing', metavar="routing_iterations", default=3, type=int, help="Number of routing iterations to use")
-parser.add_argument('--batch_norm', default=False, type=int, help="Turn on/off batch norm in encoder/decoder")
-parser.add_argument('--loss', metavar="loss_type", default="L2", help="Define reconstruction loss. Types: [L1, L2]")
-parser.add_argument('--anneal_alpha', default="none", help="Set annealing function for alpha. Options: [none, 1, 2]")
-parser.add_argument('--leaky', default=False, action="store_true",  help="Turn on/off leaky routing (Add orphan class for reconstruction)")
-parser.add_argument('--model_desc', default='partB_nofilter_10 classes, lr=1e-5/', help="Set model description")
+# MODEL
+parser.add_argument('--model_file', default='model.yaml')
+parser.add_argument('--cell_size', default=64, type=int, help="cell size")
 
 
-global args
+# TRAINING
+parser.add_argument('--batch_size', default=256, type=int)
+parser.add_argument('--epochs', default=300, type=int, help="Number of epochs to train for")
+parser.add_argument('--workers', default=4, type=int, help="Number of workers in loading dataset")
+parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
+parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
+parser.add_argument('--lr0', default=0.001, type=float, help="initial learning rate")
+parser.add_argument('--weight_decay', default=0.0005, type=float, help="weight_decay")
+parser.add_argument('--momentum', default=0.937, type=float, help="momentum")
+parser.add_argument('--adam', default=False, type=bool, help='use torch.optim.Adam() optimizer') 
 
-args = parser.parse_args()
-args.original_lr = args.lr # 1e-7
-#args.lr = 1e-7
-args.momentum      = 0.95
-args.decay         = 5*1e-4
-args.start_epoch   = 0
-args.steps         = [-1,1,100,150]
-args.scales        = [1,1,1,1]
-args.workers = 4
-args.seed = time.time()
-args.print_freq = 1
 
-args.log_dir += ('/'+args.model_desc)
-tb_writer = SummaryWriter(args.log_dir)
-   
-def main():
+def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
+
+    compute_loss = ComputeLoss(model)
     
-    best_pred = 1e6
-    
-    if not Path(args.checkpoint_path).exists():
-        os.mkdir(args.checkpoint_path)
-    args.checkpoint_path += '/checkpoint.pth.tar'
-
-    with open(args.train_json, 'r') as outfile:        
-        train_list = json.load(outfile)
-    with open(args.test_json, 'r') as outfile:       
-        val_list = json.load(outfile)
-
-    train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in train_list]
-    val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in val_list]
-    
-    if args.use_gpu:
-        os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
-        torch.cuda.manual_seed(args.seed)
-        CUDA =True
-    else:
-        CUDA = False
-
-    model = CSRNet(args.depth, reconstruction_type=args.decoder, imsize=args.input_size//8, 
-                        routing_iterations=args.routing, primary_caps_gridsize=8,
-                        img_channel=3, batchnorm=args.batch_norm, num_primary_capsules=32,
-                        loss=args.loss, leaky_routing=args.leaky)
-    
-    if CUDA:
-        model = model.cuda()
-
-    optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=args.momentum, weight_decay=args.decay)
-
-    if args.pre and args.use_pre:
-        if os.path.isfile(args.pre):
-            print("=> loading checkpoint '{}'".format(args.pre))
-            checkpoint = torch.load(args.pre)
-            args.start_epoch = checkpoint['epoch']+1
-            best_pred = checkpoint['best_pred']
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.pre, checkpoint['epoch']))
-        else:
-            print("=> no checkpoint found at '{}'".format(args.pre))
-            
     for epoch in range(args.start_epoch, args.epochs):
-        
-        adjust_learning_rate(optimizer, epoch)
-
-        # Annealing alpha
-        alpha = get_alpha(epoch)
-        
-        train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA)
-
-def zeropad(img, h, w, target=False):
-    if not target:
-        color = [0, 0, 0]
-        padded = cv2.copyMakeBorder(img, 0, h, 0, w, cv2.BORDER_CONSTANT, value=color)
-    else:
-        padded = cv2.copyMakeBorder(img, 0, h, 0, w, cv2.BORDER_CONSTANT, value=0)
-    return padded
-
-def train(train_list, val_list, model, optimizer, epoch, alpha, best_pred, CUDA):
-    
-    losses = AverageMeter()
-    batch_time = AverageMeter()
-    data_time = AverageMeter()
-    
-    train_loader = torch.utils.data.DataLoader(
-        dataset.listDataset(train_list,
+        train_loader = torch.utils.data.DataLoader(listDataset(train_list,
                        shuffle=True,
                        transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
                        train=True, 
-                       seen=model.seen,
-                       batch_size=args.batch_size,
-                       num_workers=args.workers,
-                       img_size=args.input_size),
-                    batch_size=args.batch_size)
-    print('epoch %d, processed %d samples, lr %.10f' % (epoch, epoch * len(train_loader.dataset), args.lr))
-    
-    model.train()
-    end = time.time()
+                       seen=0,
+                       batch_size=1,
+                       num_workers=args.workers))
 
-    length = 32
-    imgs, targets = [], []
-    b_num = 0
-    for bi, (img_big, target_big) in enumerate(train_loader):
-        data_time.update(time.time() - end)
+        losses = AverageMeter()
+        data_time = AverageMeter()
+        batch_time = AverageMeter()
+        end = time.time()
 
-        ni = int(math.ceil(img_big.shape[2] / length)) 
-        nj = int(math.ceil(img_big.shape[3] / length))  
-        for i in range(ni):  
-            for j in range(nj):  
-                y2 = min((i + 1) * length, img_big.shape[2])
-                y1 = y2 - length
-                x2 = min((j + 1) * length, img_big.shape[3])
-                x1 = x2 - length
+        model.train()
 
-                img_chip = img_big[:, :, y1:y2, x1:x2]
-                img_chip = zeropad(img_chip.squeeze(0).permute(1,2,0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3])
-                img_chip = torch.from_numpy(img_chip).permute(2,0,1).unsqueeze(0)
-                target_chip = target_big[:, y1:y2, x1:x2]
-                target_chip = zeropad(target_chip.squeeze(0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3], target=True)
-                target_chip = torch.from_numpy(target_chip).unsqueeze(0)
-                assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
-                assert target_chip.shape[1] == target_chip.shape[2] == length, 'target size error'
+        pbar = enumerate(train_loader)
+        pbar = tqdm(pbar, total=len(train_loader))  # progress bar
 
-                '''
-                imtest = img_chip[0,...].permute(1, 2, 0).cpu()
-                imtest = cv2.normalize(np.float32(imtest), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-                imtest = imtest.astype(np.uint8)
-                plt.subplot(121).imshow(imtest)
-                plt.subplot(122).imshow(target_chip.squeeze(0), cmap=CM.jet)
-                count = np.sum(target_chip.numpy().squeeze(0))
-                plt.title('People count: ' + str(count))
-                plt.show()
-                '''
-                count = np.sum(target_chip.numpy().squeeze(0))
-                count = np.round(count)
-                if count >= 10:
-                    #continue
-                    count = 9
-                target = torch.zeros(10)
-                target[int(count)] = 1
+        optimizer.zero_grad()
 
-                img = Variable(img_chip)
-                target = Variable(target)
-                
-                imgs.append(img)
-                targets.append(target)
-                b_num += 1
+        imgs, targets = [], []
+        length = args.cell_size
+        b_num = 0
 
-                if b_num >= 256:
-                    img = torch.stack(imgs, dim=0).squeeze(1)
-                    target = torch.stack(targets, dim=0)
+        for bi, (img_big, target_big) in pbar:  # batch ----------
+            data_time.update(time.time() - end)
 
-                    if CUDA:
-                        img = img.cuda()
-                        target = target.cuda()
+            ni = int(math.ceil(img_big.shape[2] / length)) 
+            nj = int(math.ceil(img_big.shape[3] / length))  
+            for i in range(ni):  
+                for j in range(nj):  
+                    y2 = min((i + 1) * length, img_big.shape[2])
+                    y1 = y2 - length
+                    x2 = min((j + 1) * length, img_big.shape[3])
+                    x1 = x2 - length
 
-                    '''
-                    if epoch <= 1:
-                        tb_writer.add_graph(torch.jit.trace(model, img, strict=False), [])
-                    '''
-                    capsule_output, reconstruction, _ = model(img, target)
-                    predictions = torch.norm(capsule_output.squeeze(), dim=2)
-                    loss, rec_loss, marg_loss = model.loss(img, target, capsule_output, reconstruction, alpha)
-                    
-                    losses.update(loss.item(), img.size(0))
+                    img_chip = img_big[:, :, y1:y2, x1:x2]
+                    img_chip = zeropad(img_chip.squeeze(0).permute(1,2,0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3])
+                    img_chip = torch.from_numpy(img_chip).permute(2,0,1).unsqueeze(0)
+                    target_chip = target_big[:, y1:y2, x1:x2]
+                    target_chip = zeropad(target_chip.squeeze(0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3], target=True)
+                    target_chip = torch.from_numpy(target_chip).unsqueeze(0)
+                    assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
+                    assert target_chip.shape[1] == target_chip.shape[2] == length, 'target size error'
+            
+                    if args.vis:
+                        vis_input(img_chip, target_chip)
 
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()    
-                    
-                    batch_time.update(time.time() - end)
-                    end = time.time()
-                    
-                    if bi % args.print_freq == 0:
-                        print('Epoch: [{0}][{1}/{2}]\t'
-                            'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                            'Epoch Time {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                            'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                            .format(epoch, bi, len(train_loader), batch_time=batch_time, data_time=data_time, loss=losses))
-                    
-                        #tb_writer.add_scalar('train loss/iteration', losses.avg, epoch * len(train_loader.dataset) + bi)
+                    coord = (target_chip.squeeze(0)).nonzero(as_tuple=False)
 
-                    imgs = []
-                    targets = []
-                    b_num = 0
+                    bxy = [[b_num, yb/length, xb/length] for (yb, xb) in coord]
+                    targets.append(torch.tensor(bxy))
 
-    pred, val_losses = validate(val_list, model, alpha, CUDA)
+                    img = Variable(img_chip)
+                    imgs.append(img)
+                    b_num += 1
+
+                    if b_num >= args.batch_size:
+                        imgs = torch.stack(imgs, dim=0).squeeze(1)
+                        targets = [ti for ti in targets if len(ti) != 0]
+                        targets = torch.cat(targets)
+
+                        if CUDA:
+                            imgs = imgs.cuda()
+                            targets = targets.cuda()
+                        
+                        if epoch <= 1:
+                            tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
+
+                        pred = model(imgs, training=True)  # forward
+                        loss, _ = compute_loss(pred, targets)  # loss scaled by batch_size
+
+                        losses.update(loss.item(), imgs.size(0))
+
+                        optimizer.zero_grad()
+                        loss.backward()
+                        optimizer.step()    
+                        
+                        batch_time.update(time.time() - end)
+                        end = time.time()
+
+                        s = ('Epoch [{0}][{1}/{2}] '
+                            'Time/b {batch_time.val:.2f} ({batch_time.avg:.2f}) '
+                            'Loss {loss.val:.4f} ({loss.avg:.3f}) '
+                            .format(epoch, bi, len(train_loader), batch_time=batch_time, loss=losses))
+                        
+                        pbar.set_description(s)
+
+                        imgs = []
+                        targets = []
+                        b_num = 0
+
+            # end batch ------------
+
+        pred, val_losses = validate(args, val_list, model, CUDA, compute_loss)
+
+        is_best = pred < args.best_pred
+        args.best_pred = min(pred, args.best_pred)
+        print(' * best MAE {mae:.3f} '.format(mae=args.best_pred))
         
-    is_best = pred < best_pred
-    best_pred = min(pred, best_pred)
-    print(' * best MAE {mae:.3f} '.format(mae=best_pred))
-    save_checkpoint({
-        'epoch': epoch,
-        'arch': args.pre,
-        'state_dict': model.state_dict(),
-        'best_pred': best_pred,
-        'optimizer' : optimizer.state_dict(),}, is_best, args.checkpoint_path)
-    
-    tb_writer.add_scalar('train loss/epoch', losses.avg, epoch)
-    tb_writer.add_scalar('val loss/epoch', val_losses.avg, epoch)
-    tb_writer.add_scalar('MAE/epoch', pred, epoch)
+        save_checkpoint({
+            'epoch': epoch,
+            'arch': args.pre,
+            'state_dict': model.state_dict(),
+            'best_pred': args.best_pred,
+            'optimizer' : optimizer.state_dict(),}, is_best, args.checkpoint_path)
+        
+        tb_writer.add_scalar('train loss/total', losses.avg, epoch)
+        tb_writer.add_scalar('val loss/total', val_losses.avg, epoch)
+        tb_writer.add_scalar('MAE/average', pred, epoch)
+
+        # end epoch ------------
 
 
-
-def get_alpha(epoch):
-    # WARNING: Does not support alpha value saving when continuning training from a saved model
-    DEFAULT_ANNEAL_TEMPERATURE = 8
-    if args.anneal_alpha == "none":
-        alpha = args.alpha
-    if args.anneal_alpha == "1":
-        alpha = args.alpha * float(np.tanh(epoch/DEFAULT_ANNEAL_TEMPERATURE - np.pi) + 1) / 2
-    if args.anneal_alpha == "2":
-        alpha = args.alpha * float(np.tanh(epoch/(2 * DEFAULT_ANNEAL_TEMPERATURE)))
-    return alpha
-
-
-def validate(val_list, model, alpha, CUDA):
-    print ('begin test')
-    test_loader = torch.utils.data.DataLoader(dataset.listDataset(val_list, shuffle=False, transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), train=False, img_size=args.input_size), batch_size=args.batch_size)    
+def validate(args, val_list, model, CUDA, compute_loss):
+    print ('begin validation')
+    val_loader = torch.utils.data.DataLoader(listDataset(val_list, 
+                    shuffle=False, transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
+                    train=False), 
+                    batch_size=1)    
     
     model.eval()
+
+    pbar = enumerate(val_loader)
+    pbar = tqdm(pbar, total=len(val_loader))  # progress bar
     
     losses = AverageMeter()
     mae = 0
-    length = 32
+    length = args.cell_size
     imgs, targets = [], []
     b_num = 0
-    for bi, (img_big, target_big) in enumerate(test_loader):
+
+    for bi, (img_big, target_big) in pbar:  
         ni = int(math.ceil(img_big.shape[2] / length))  
         nj = int(math.ceil(img_big.shape[3] / length)) 
         for i in range(ni):  
@@ -306,84 +205,114 @@ def validate(val_list, model, alpha, CUDA):
                 assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
                 assert target_chip.shape[1] == target_chip.shape[2] == length, 'target size error'
 
-                count = np.sum(target_chip.numpy().squeeze(0))
-                count = np.round(count)
-                if count >= 10:
-                    #continue
-                    count = 9
-                target = torch.zeros(10)
-                target[int(count)] = 1
+                coord = (target_chip.squeeze(0)).nonzero(as_tuple=False)
+
+                bxy = [[b_num, yb/length, xb/length] for (yb, xb) in coord]
+                targets.append(torch.tensor(bxy))
 
                 img = torch.clone(img_chip)
-                target = torch.clone(target)
-                
                 imgs.append(img)
-                targets.append(target)
+
                 b_num += 1
 
                 if i == (ni-1) and j == (nj-1):
-                    img = torch.stack(imgs, dim=0).squeeze(1)
-                    target = torch.stack(targets, dim=0)
+                    imgs = torch.stack(imgs, dim=0).squeeze(1)
+                    targets = [ti for ti in targets if len(ti) != 0]
+                    targets = torch.cat(targets)
 
                     if CUDA:
-                        img = img.cuda()
-                        target = target.cuda()
+                        imgs = imgs.cuda()
+                        targets = targets.cuda()
 
                     with torch.no_grad():
-                        capsule_output, reconstruction, predictions = model(img)
-                        loss, rec_loss, marg_loss = model.loss(img, target, capsule_output, reconstruction, alpha)
+                        pred = model(imgs, training=False)
+                        loss, _ = compute_loss(pred, targets)  # loss scaled by batch_size
 
-                        losses.update(loss.item(), img.size(0))
+                        losses.update(loss.item(), imgs.size(0))
+                        pred = pred > 0.9
+                        pred = pred.sum()
+
+                        targets = targets.shape[0]
                         
-                        predictions = np.argmax(predictions.cpu(), axis=1) 
-                        target = np.argmax(target.cpu(), axis=1) 
-                        
-                        mae += abs(predictions.data.sum() - target.sum().type(torch.FloatTensor).cuda())
+                        mae += abs(pred - targets)
                         
                         imgs = []
                         targets = []
                         b_num = 0
         
-    mae = mae/len(test_loader)    
+    mae = mae/len(val_loader)    
     print(' * MAE {mae:.3f} '.format(mae=mae))
 
-    return mae, losses    
-        
-def adjust_learning_rate(optimizer, epoch):
-    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    
-    args.lr = args.original_lr
-    
-    for i in range(len(args.steps)):
-        
-        scale = args.scales[i] if i < len(args.scales) else 1
-        
-        if epoch >= args.steps[i]:
-            args.lr = args.lr * scale
-            if epoch == args.steps[i]:
-                break
+    return mae, losses       
+
+
+def main():
+    args = parser.parse_args()
+
+    args.best_pred = 1e6
+
+    args.log_dir += ('/'+args.model_desc)
+    tb_writer = SummaryWriter(args.log_dir)
+
+    args.checkpoint_path += ('/'+args.model_desc)
+    if not Path(args.checkpoint_path).exists():
+        os.mkdir(args.checkpoint_path)
+    args.checkpoint_path += 'checkpoint.pth.tar'
+
+    if args.exp == 'shanghai':
+        with open(args.train_json, 'r') as outfile:        
+            train_list = json.load(outfile)
+        with open(args.val_json, 'r') as outfile:       
+            val_list = json.load(outfile)
+
+        train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in train_list]
+        val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in val_list]
+
+    if args.use_gpu:
+        os.environ['CUDA_VISIBLE_DEVICES'] = args.device
+        torch.cuda.manual_seed(time.time())
+        CUDA =True
+    else:
+        CUDA = False
+
+    model = Model(args.model_file)
+
+    if CUDA:
+        model = model.cuda()
+
+    pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
+    for k, v in model.named_modules():
+        if hasattr(v, 'bias') and isinstance(v.bias, nn.Parameter):
+            pg2.append(v.bias)  # biases
+        if isinstance(v, nn.BatchNorm2d):
+            pg0.append(v.weight)  # no decay
+        elif hasattr(v, 'weight') and isinstance(v.weight, nn.Parameter):
+            pg1.append(v.weight)  # apply decay
+
+    if args.adam:
+        optimizer = torch.optim.Adam(pg0, lr=args.lr0, betas=(args.momentum, 0.999))  # adjust beta1 to momentum
+    else:
+        optimizer = torch.optim.SGD(pg0, lr=args.lr0, momentum=args.momentum, nesterov=True)
+
+    optimizer.add_param_group({'params': pg1, 'weight_decay': args.weight_decay})  # add pg1 with weight_decay
+    optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
+    del pg0, pg1, pg2
+
+    if args.pre and args.use_pre:
+        if os.path.isfile(args.pre):
+            print("=> loading checkpoint '{}'".format(args.pre))
+            checkpoint = torch.load(args.pre)
+            args.start_epoch = checkpoint['epoch']+1
+            args.best_pred = checkpoint['best_pred']
+            model.load_state_dict(checkpoint['state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            print("=> loaded checkpoint '{}' (epoch {})".format(args.pre, checkpoint['epoch']))
         else:
-            break
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = args.lr
-        
-class AverageMeter(object):
-    """Computes and stores the average and current value"""
-    def __init__(self):
-        self.reset()
+            print("=> no checkpoint found at '{}'".format(args.pre))
 
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.sum = 0
-        self.count = 0
 
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count    
+    train(args, model, optimizer, train_list, val_list, tb_writer, CUDA) 
 
-    
+
 if __name__ == '__main__':
-    main()        
+    main() 
