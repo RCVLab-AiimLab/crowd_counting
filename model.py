@@ -226,6 +226,7 @@ class ComputeLoss:
         b = t[:, 0].long().T  # image, class
         gxy = t[:, 1:]  # grid xy
 
+
         gij = gxy.long()
         gi, gj = gij.T  # grid xy indices
 
