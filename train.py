@@ -20,10 +20,10 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiB, darknet, lr=1e-3/', help="Set model description")
-parser.add_argument('--train_json', default=path/'datasets/shanghai/part_B_train.json', help='path to train json')
-parser.add_argument('--val_json', default=path/'datasets/shanghai/part_B_val.json', help='path to test json')
-parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
+parser.add_argument('--model_desc', default='shanghaiA, darknet, lr=1e-4/', help="Set model description")
+parser.add_argument('--train_json', default=path/'datasets/shanghai/part_A_train.json', help='path to train json')
+parser.add_argument('--val_json', default=path/'datasets/shanghai/part_A_val.json', help='path to test json')
+parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
@@ -38,7 +38,7 @@ parser.add_argument('--threshold', default=0.9, type=int, help="threshold for th
 
 # TRAINING
 parser.add_argument('--batch_size', default=256, type=int)
-parser.add_argument('--epochs', default=300, type=int, help="Number of epochs to train for")
+parser.add_argument('--epochs', default=1000, type=int, help="Number of epochs to train for")
 parser.add_argument('--workers', default=4, type=int, help="Number of workers in loading dataset")
 parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
@@ -123,7 +123,7 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
                             tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
 
                         pred = model(imgs, training=True)  # forward
-                        loss, _ = compute_loss(pred, targets)  # loss scaled by batch_size
+                        loss, _ = compute_loss(pred, targets) 
 
                         losses.update(loss.item(), imgs.size(0))
 
@@ -228,7 +228,8 @@ def validate(args, val_list, model, CUDA, compute_loss):
                         loss, _ = compute_loss(pred, targets)  # loss scaled by batch_size
 
                         losses.update(loss.item(), imgs.size(0))
-                        pred = pred > args.threshold
+                        
+                        #pred = pred > args.threshold
                         pred = pred.sum()
 
                         targets = targets.shape[0]

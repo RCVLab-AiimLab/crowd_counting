@@ -22,17 +22,17 @@ from model import Model
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='shanghaiB, darknet, lr=1e-3/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA, darknet, lr=1e-4/', help="Set model description")
 parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
-parser.add_argument('--exp_sets', default='part_B_final/test_data')
-parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
+parser.add_argument('--exp_sets', default='part_A_final/test_data')
+parser.add_argument('--use_gpu', default=True, help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
 
 # MODEL
 parser.add_argument('--model_file', default='model.yaml')
 parser.add_argument('--cell_size', default=64, type=int, help="cell size")
-parser.add_argument('--threshold', default=0.01, type=int, help="threshold for the classification output")
+parser.add_argument('--threshold', default=0.5, type=int, help="threshold for the classification output")
 
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
 
@@ -57,7 +57,8 @@ def test():
 
     
     args.checkpoint_path += ('/'+args.model_desc)
-    args.checkpoint_path += 'model_best.pth.tar' #'checkpoint.pth.tar'
+    args.checkpoint_path += 'checkpoint.pth.tar'
+    #args.checkpoint_path += 'model_best.pth.tar'
     
     model = Model(args.model_file)
 
@@ -68,10 +69,10 @@ def test():
 
     model.load_state_dict(checkpoint['state_dict'])
 
-    imgs, targets = [], []
+    imgs, targets, target_chips = [], [], []
     length = args.cell_size
     b_num = 0
-    sum_mae = 0
+    sum_mae, sum_mse = 0, 0
     dataset_length = len(img_paths)
     
     pbar = enumerate(img_paths)
@@ -104,15 +105,14 @@ def test():
                 assert img_chip.shape[1] == img_chip.shape[2] == length, 'image size error'
                 assert target_chip.shape[0] == target_chip.shape[1] == length, 'target size error'
 
-                if args.vis:
-                    vis_input(img_chip, target_chip)
-
                 coord = (target_chip).nonzero(as_tuple=False)
                 bxy = [[b_num, yb/length, xb/length] for (yb, xb) in coord]
                 targets.append(torch.tensor(bxy))
 
                 img = torch.clone(img_chip)
                 imgs.append(img)
+
+                target_chips.append(target_chip)
                 
                 b_num += 1
 
@@ -121,30 +121,72 @@ def test():
                     targets = [ti for ti in targets if len(ti) != 0]
                     targets = torch.cat(targets)
 
+                    target_chips = torch.stack(target_chips, dim=0).squeeze(1)
+
                     if CUDA:
                         imgs = imgs.cuda()
                         targets = targets.cuda()
 
                     with torch.no_grad():
                         pred = model(imgs, training=False)
-                        pred = pred > args.threshold
+
+                        '''### 
+                        import torch.nn as nn 
+                        import matplotlib.pyplot as plt
+                        import cv2 
+                        upsample = nn.Upsample(scale_factor=4, mode='nearest')
+                        img_reconstracted = torch.zeros_like(img_big)
+                        pred_reconstracted = torch.zeros_like(img_big[0,:,:])
+                        target_reconstracted = torch.zeros_like(img_big[0,:,:])
+                        k = -1
+                        for ii in range(ni):  
+                            for jj in range(nj):  
+                                y2 = min((ii + 1) * length, img_big.shape[1])
+                                y1 = y2 - length
+                                x2 = min((jj + 1) * length, img_big.shape[2])
+                                x1 = x2 - length
+
+                                k += 1
+                                img_reconstracted[:, y1:y2, x1:x2] = imgs[k, ...]
+                                target_reconstracted[y1:y2, x1:x2] = target_chips[k, ...]
+                                pred_reconstracted[y1:y2, x1:x2] = upsample(pred[k, ...].unsqueeze(0).unsqueeze(0))
+
+                        im = img_reconstracted.permute(1, 2, 0).cpu()
+                        im = cv2.normalize(np.float32(im), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+                        im = im.astype(np.uint8)
+                        plt.subplot(1,2,1).imshow(im)
+                        count = target_reconstracted.sum()
+                        plt.title('People count: ' + str(count.item()))
+                        plt.subplot(1,2,2).imshow(pred_reconstracted)
+                        count = (pred_reconstracted > args.threshold).sum()
+                        plt.title('Predicted count: ' + str(count.item()))
+                        #plt.subplot(1,4,3).imshow(target_reconstracted)
+                        #plt.subplot(1,4,4).imshow(pred_reconstracted < args.threshold)
+                        plt.show()
+                        ###'''
+
+                        if args.vis:
+                            im_i = imgs.size(0)//2
+                            vis_input(imgs[im_i, ...], target_chips[im_i, ...], predicted=pred[im_i, ...], thresholded=pred[im_i, ...] > args.threshold)
+                        
+                        #pred = pred > args.threshold
                         pred = pred.sum()
 
                         targets = targets.shape[0]
                         mae = abs(pred - targets)
+                        mse = (pred -targets)**2
                         sum_mae += mae
+                        sum_mse += mse
 
-                        s = str((bi, 'MAE: ', mae, 'pred: ', pred, 'target: ', targets))
+                        s = str((bi, 'MAE: ', mae.item(), 'pred: ', pred.item(), 'target: ', targets))
                         pbar.set_description(s)
 
                         imgs = []
                         targets = []
+                        target_chips = []
                         b_num = 0
 
-
-    print(sum_mae/dataset_length)
-
-
+    print(' * MAE {mae:.3f} \n * MSE {mse:.3f} '.format(mae=(sum_mae/dataset_length).item(), mse=(sum_mse/dataset_length).sqrt().item()))
 
 
 
