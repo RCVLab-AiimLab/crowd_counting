@@ -34,7 +34,10 @@ parser.add_argument('--model_file', default='model.yaml')
 parser.add_argument('--cell_size', default=64, type=int, help="cell size")
 parser.add_argument('--threshold', default=0.5, type=int, help="threshold for the classification output")
 
-parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
+parser.add_argument('--best', default=False, type=bool, help='best or last saved checkpoint?') 
+parser.add_argument('--vis_patch', default=False, type=bool, help='visualize the patches') 
+parser.add_argument('--vis_image', default=False, type=bool, help='visualize the whole image') 
+parser.add_argument('--prob_map', default=True, type=bool, help='using threshold or probability map?') 
 
 
 
@@ -54,12 +57,13 @@ def test():
     for path in path_sets:
         for img_path in glob.glob(os.path.join(path, '*.jpg')):
             img_paths.append(img_path)
-
     
     args.checkpoint_path += ('/'+args.model_desc)
-    args.checkpoint_path += 'checkpoint.pth.tar'
-    #args.checkpoint_path += 'model_best.pth.tar'
-    
+    if args.best:
+        args.checkpoint_path += 'model_best.pth.tar'
+    else:
+        args.checkpoint_path += 'checkpoint.pth.tar'
+
     model = Model(args.model_file)
 
     if CUDA:
@@ -130,46 +134,48 @@ def test():
                     with torch.no_grad():
                         pred = model(imgs, training=False)
 
-                        '''### 
-                        import torch.nn as nn 
-                        import matplotlib.pyplot as plt
-                        import cv2 
-                        upsample = nn.Upsample(scale_factor=4, mode='nearest')
-                        img_reconstracted = torch.zeros_like(img_big)
-                        pred_reconstracted = torch.zeros_like(img_big[0,:,:])
-                        target_reconstracted = torch.zeros_like(img_big[0,:,:])
-                        k = -1
-                        for ii in range(ni):  
-                            for jj in range(nj):  
-                                y2 = min((ii + 1) * length, img_big.shape[1])
-                                y1 = y2 - length
-                                x2 = min((jj + 1) * length, img_big.shape[2])
-                                x1 = x2 - length
+                        if args.vis_image:
+                            import torch.nn as nn 
+                            import matplotlib.pyplot as plt
+                            import cv2 
+                            upsample = nn.Upsample(scale_factor=4, mode='nearest')
+                            img_reconstracted = torch.zeros_like(img_big)
+                            pred_reconstracted = torch.zeros_like(img_big[0,:,:])
+                            target_reconstracted = torch.zeros_like(img_big[0,:,:])
+                            k = -1
+                            for ii in range(ni):  
+                                for jj in range(nj):  
+                                    y2 = min((ii + 1) * length, img_big.shape[1])
+                                    y1 = y2 - length
+                                    x2 = min((jj + 1) * length, img_big.shape[2])
+                                    x1 = x2 - length
 
-                                k += 1
-                                img_reconstracted[:, y1:y2, x1:x2] = imgs[k, ...]
-                                target_reconstracted[y1:y2, x1:x2] = target_chips[k, ...]
-                                pred_reconstracted[y1:y2, x1:x2] = upsample(pred[k, ...].unsqueeze(0).unsqueeze(0))
+                                    k += 1
+                                    img_reconstracted[:, y1:y2, x1:x2] = imgs[k, ...]
+                                    target_reconstracted[y1:y2, x1:x2] = target_chips[k, ...]
+                                    pred_reconstracted[y1:y2, x1:x2] = upsample(pred[k, ...].unsqueeze(0).unsqueeze(0))
 
-                        im = img_reconstracted.permute(1, 2, 0).cpu()
-                        im = cv2.normalize(np.float32(im), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-                        im = im.astype(np.uint8)
-                        plt.subplot(1,2,1).imshow(im)
-                        count = target_reconstracted.sum()
-                        plt.title('People count: ' + str(count.item()))
-                        plt.subplot(1,2,2).imshow(pred_reconstracted)
-                        count = (pred_reconstracted > args.threshold).sum()
-                        plt.title('Predicted count: ' + str(count.item()))
-                        #plt.subplot(1,4,3).imshow(target_reconstracted)
-                        #plt.subplot(1,4,4).imshow(pred_reconstracted < args.threshold)
-                        plt.show()
-                        ###'''
+                            im = img_reconstracted.permute(1, 2, 0).cpu()
+                            im = cv2.normalize(np.float32(im), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+                            im = im.astype(np.uint8)
+                            plt.subplot(1,2,1).imshow(im)
+                            count = target_reconstracted.sum()
+                            plt.title('People count: ' + str(count.item()))
+                            plt.subplot(1,2,2).imshow(pred_reconstracted)
+                            count = (pred_reconstracted > args.threshold).sum()
+                            plt.title('Predicted count: ' + str(count.item()))
+                            #plt.subplot(1,4,3).imshow(target_reconstracted)
+                            #plt.subplot(1,4,4).imshow(pred_reconstracted < args.threshold)
+                            plt.show()
+                        
 
-                        if args.vis:
+                        if args.vis_patch:
                             im_i = imgs.size(0)//2
                             vis_input(imgs[im_i, ...], target_chips[im_i, ...], predicted=pred[im_i, ...], thresholded=pred[im_i, ...] > args.threshold)
                         
-                        #pred = pred > args.threshold
+                        if not args.prob_map:
+                            pred = pred > args.threshold
+                        
                         pred = pred.sum()
 
                         targets = targets.shape[0]
