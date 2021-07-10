@@ -20,10 +20,10 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiA, darknet, lr=1e-4/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA, darknet, countInCell, lr=1e-5/', help="Set model description")
 parser.add_argument('--train_json', default=path/'datasets/shanghai/part_A_train.json', help='path to train json')
 parser.add_argument('--val_json', default=path/'datasets/shanghai/part_A_val.json', help='path to test json')
-parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
+parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
@@ -37,12 +37,12 @@ parser.add_argument('--threshold', default=0.9, type=int, help="threshold for th
 
 
 # TRAINING
-parser.add_argument('--batch_size', default=256, type=int)
+parser.add_argument('--batch_size', default=512, type=int)
 parser.add_argument('--epochs', default=1000, type=int, help="Number of epochs to train for")
 parser.add_argument('--workers', default=4, type=int, help="Number of workers in loading dataset")
 parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
-parser.add_argument('--lr0', default=0.0001, type=float, help="initial learning rate")
+parser.add_argument('--lr0', default=0.00001, type=float, help="initial learning rate")
 parser.add_argument('--weight_decay', default=0.0005, type=float, help="weight_decay")
 parser.add_argument('--momentum', default=0.937, type=float, help="momentum")
 parser.add_argument('--adam', default=False, type=bool, help='use torch.optim.Adam() optimizer') 
@@ -62,6 +62,8 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
                        num_workers=args.workers))
 
         losses = AverageMeter()
+        losses_obj = AverageMeter()
+        losses_num = AverageMeter()
         data_time = AverageMeter()
         batch_time = AverageMeter()
         end = time.time()
@@ -123,9 +125,11 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
                             tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
 
                         pred = model(imgs, training=True)  # forward
-                        loss, _ = compute_loss(pred, targets) 
+                        loss, lobj, lnum = compute_loss(pred, targets) 
 
                         losses.update(loss.item(), imgs.size(0))
+                        losses_obj.update(lobj.item(), imgs.size(0))
+                        losses_num.update(lnum.item(), imgs.size(0))
 
                         optimizer.zero_grad()
                         loss.backward()
@@ -147,7 +151,7 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
 
             # end batch ------------
 
-        pred, val_losses = validate(args, val_list, model, CUDA, compute_loss)
+        pred, predByNum, val_losses = validate(args, val_list, model, CUDA, compute_loss)
 
         is_best = pred < args.best_pred
         args.best_pred = min(pred, args.best_pred)
@@ -161,8 +165,11 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
             'optimizer' : optimizer.state_dict(),}, is_best, args.checkpoint_path)
         
         tb_writer.add_scalar('train loss/total', losses.avg, epoch)
+        tb_writer.add_scalar('train loss/obj', losses_obj.avg, epoch)
+        tb_writer.add_scalar('train loss/num', losses_num.avg, epoch)
         tb_writer.add_scalar('val loss/total', val_losses.avg, epoch)
         tb_writer.add_scalar('MAE/average', pred, epoch)
+        tb_writer.add_scalar('MAE/averageByNum', predByNum, epoch)
 
         # end epoch ------------
 
@@ -181,69 +188,79 @@ def validate(args, val_list, model, CUDA, compute_loss):
     
     losses = AverageMeter()
     mae = 0
+    maeByNum = 0
     length = args.cell_size
     imgs, targets = [], []
     b_num = 0
 
-    for bi, (img_big, target_big) in pbar:  
-        ni = int(math.ceil(img_big.shape[2] / length))  
-        nj = int(math.ceil(img_big.shape[3] / length)) 
-        for i in range(ni):  
-            for j in range(nj):  
-                y2 = min((i + 1) * length, img_big.shape[2])
-                y1 = y2 - length
-                x2 = min((j + 1) * length, img_big.shape[3])
-                x1 = x2 - length
+    with open(args.log_dir + 'results.txt', 'w') as f:
+        for bi, (img_big, target_big) in pbar:  
+            ni = int(math.ceil(img_big.shape[2] / length))  
+            nj = int(math.ceil(img_big.shape[3] / length)) 
+            for i in range(ni):  
+                for j in range(nj):  
+                    y2 = min((i + 1) * length, img_big.shape[2])
+                    y1 = y2 - length
+                    x2 = min((j + 1) * length, img_big.shape[3])
+                    x1 = x2 - length
 
-                img_chip = img_big[:, :, y1:y2, x1:x2]
-                img_chip = zeropad(img_chip.squeeze(0).permute(1,2,0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3])
-                img_chip = torch.from_numpy(img_chip).permute(2,0,1).unsqueeze(0)
-                target_chip = target_big[:, y1:y2, x1:x2]
-                target_chip = zeropad(target_chip.squeeze(0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3], target=True)
-                target_chip = torch.from_numpy(target_chip).unsqueeze(0)
-                assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
-                assert target_chip.shape[1] == target_chip.shape[2] == length, 'target size error'
+                    img_chip = img_big[:, :, y1:y2, x1:x2]
+                    img_chip = zeropad(img_chip.squeeze(0).permute(1,2,0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3])
+                    img_chip = torch.from_numpy(img_chip).permute(2,0,1).unsqueeze(0)
+                    target_chip = target_big[:, y1:y2, x1:x2]
+                    target_chip = zeropad(target_chip.squeeze(0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3], target=True)
+                    target_chip = torch.from_numpy(target_chip).unsqueeze(0)
+                    assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
+                    assert target_chip.shape[1] == target_chip.shape[2] == length, 'target size error'
 
-                coord = (target_chip.squeeze(0)).nonzero(as_tuple=False)
+                    coord = (target_chip.squeeze(0)).nonzero(as_tuple=False)
 
-                bxy = [[b_num, yb/length, xb/length] for (yb, xb) in coord]
-                targets.append(torch.tensor(bxy))
+                    bxy = [[b_num, yb/length, xb/length] for (yb, xb) in coord]
+                    targets.append(torch.tensor(bxy))
 
-                img = torch.clone(img_chip)
-                imgs.append(img)
+                    img = torch.clone(img_chip)
+                    imgs.append(img)
 
-                b_num += 1
+                    b_num += 1
 
-                if i == (ni-1) and j == (nj-1):
-                    imgs = torch.stack(imgs, dim=0).squeeze(1)
-                    targets = [ti for ti in targets if len(ti) != 0]
-                    targets = torch.cat(targets)
+                    if i == (ni-1) and j == (nj-1):
+                        imgs = torch.stack(imgs, dim=0).squeeze(1)
+                        targets = [ti for ti in targets if len(ti) != 0]
+                        targets = torch.cat(targets)
 
-                    if CUDA:
-                        imgs = imgs.cuda()
-                        targets = targets.cuda()
+                        if CUDA:
+                            imgs = imgs.cuda()
+                            targets = targets.cuda()
 
-                    with torch.no_grad():
-                        pred = model(imgs, training=False)
-                        loss, _ = compute_loss(pred, targets)  # loss scaled by batch_size
+                        with torch.no_grad():
+                            predictions = model(imgs, training=False)
+                            loss, _, _ = compute_loss(predictions, targets)  # loss scaled by batch_size
 
-                        losses.update(loss.item(), imgs.size(0))
-                        
-                        #pred = pred > args.threshold
-                        pred = pred.sum()
+                            losses.update(loss.item(), imgs.size(0))
+                            
+                            #pred = pred > args.threshold
+                            pred = predictions[:, 0, :, :].sum()
+                            predByNum = predictions[:, 1, ...].view(predictions.size(0), -1).mean(1, keepdim=True)
+                            predByNum = predByNum.sum()
 
-                        targets = targets.shape[0]
-                        
-                        mae += abs(pred - targets)
-                        
-                        imgs = []
-                        targets = []
-                        b_num = 0
+                            targets = targets.shape[0]
+                            
+                            mae += abs(pred - targets)
+                            maeByNum += abs(predByNum - targets)
+
+                            s = '*Target {targets:.2f}\t *Pred_prob {pred:.4f}\t *Pred_num {predByNum:.4f}\t MAE_prob {mae:.4f}\t *MAE_num {maeByNum:.4f}\n'.format(targets=targets, pred=pred, predByNum=predByNum, mae=(pred-targets), maeByNum=(predByNum-targets))
+                            f.writelines(s)
+
+                            imgs = []
+                            targets = []
+                            b_num = 0
         
-    mae = mae/len(val_loader)    
+    mae = mae/len(val_loader)
+    maeByNum = maeByNum/len(val_loader)
     print(' * MAE {mae:.3f} '.format(mae=mae))
+    print(' * MAEByNum {mae:.3f} '.format(mae=maeByNum))
 
-    return mae, losses       
+    return mae, maeByNum, losses       
 
 
 def main():

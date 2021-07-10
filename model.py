@@ -101,6 +101,7 @@ def parse_model(d):  # model_dict, input_channels(3)
             c2 = sum([ch[x] for x in f])
         elif m is Detect:
             args.append([ch[x] for x in f])
+            #args[1] = [list(range(args[1] * 2))] * len(f)
             args = [args[2]]
 
         else:
@@ -124,18 +125,18 @@ class Detect(nn.Module):
     def __init__(self, ch=()):
         super(Detect, self).__init__()
         self.grid = [torch.zeros(1)]
-        self.m = nn.ModuleList(nn.Conv2d(x, 1, 1) for x in ch)  # output conv
+        self.m = nn.ModuleList(nn.Conv2d(x, 2, 1) for x in ch)  # output conv
 
 
     def forward(self, x, inference):
 
         x = self.m[0](x[0])  # conv
         
-        bs, _, ny, nx = x.shape
-        x = x.view(bs, ny, nx)
+        #bs, _, ny, nx = x.shape
+        #x = x.view(bs, ny, nx)
 
         if inference:  # inference
-            x = x.sigmoid().squeeze()
+            x[:, 0, :, :] = x[:, 0, :, :].sigmoid()#.squeeze()
 
         return x
 
@@ -185,34 +186,39 @@ class ComputeLoss:
         device = next(model.parameters()).device  # get model device
 
         # Define criteria
-        BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
-
-        det = model.model[-1]  # Detect() module
-        self.ssi = list(det.stride).index(16) if autobalance else 0  
-        self.BCEobj = BCEobj
+        self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
+        self.MSELoss = nn.MSELoss()
         
 
     def __call__(self, p, targets): 
         device = targets.device
         lobj = torch.zeros(1, device=device)
+        lnum = torch.zeros(1, device=device)
         indices = self.build_targets(p, targets) 
 
         # Losses
         b, gj, gi = indices[0]  
-        tobj = torch.zeros_like(p, device=device)  
+        tobj = torch.zeros_like(p[:, 0, :, :], device=device)  
+        tnum = torch.zeros_like(p[:, 0, :, :], device=device)  
 
         n = b.shape[0]  
         if n:
 
             tobj[b, gi, gj] = 1 
+            nonempty, count = torch.unique(b, return_counts=True) 
+            for k, bi in enumerate(nonempty):
+                tnum[bi, :, :] = count[k] 
         
-        obji = self.BCEobj(p, tobj)
-        
-        lobj += obji 
+        obji = self.BCEobj(p[:, 0, :, :], tobj)
+        numi = self.MSELoss(p[:, 1, :, :], tnum)
+
+        lobj += obji  
+        lnum += numi
 
         bs = tobj.shape[0]  # batch size
 
-        return lobj * bs, lobj.detach()
+        return (lobj * bs) + lnum, lobj.detach(), lnum.detach()
+
 
     def build_targets(self, p, targets):
         # Build targets for compute_loss()
@@ -220,7 +226,7 @@ class ComputeLoss:
 
         gain = torch.ones(3, device=targets.device)  # normalized to gridspace gain
         
-        gain[1:3] = torch.tensor(p.shape)[[2, 1]]  # xyxy gain
+        gain[1:3] = torch.tensor(p.shape)[[3, 2]]  # xyxy gain
         t = targets * gain
 
         b = t[:, 0].long().T  # image, class
