@@ -20,7 +20,7 @@ Queens_Geotab_EXP = not CSRNet_EXP
 
 #set the root to the Shanghai dataset you download
 if CSRNet_EXP:
-    root = '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset'
+    root = '/drive/datasets/ShanghaiTech_Crowd_Counting_Dataset'
 
 elif Queens_Geotab_EXP: 
     root = '/media/mohsen/myDrive/datasets/Queens_Geotab/Crowd_Counting_Sim_Dataset_01/Crowd_Counting_Sim_Dataset'

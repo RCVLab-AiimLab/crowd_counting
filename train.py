@@ -24,12 +24,12 @@ parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 parser.add_argument('--model_desc', default='shanghaiB, darknet, lr=1e-3/', help="Set model description")
 parser.add_argument('--train_json', default=path/'datasets/shanghai/part_B_train.json', help='path to train json')
 parser.add_argument('--val_json', default=path/'datasets/shanghai/part_B_val.json', help='path to test json')
-parser.add_argument('--pre', '-p', default='../runs/weights/checkpoint.pth.tar', type=str, help='path to the pretrained model')
+parser.add_argument('--pre', '-p', default='/drive/work_dirs/crowd_counting_shanghai_b/checkpoint.pth.tar', type=str, help='path to the pretrained model')
 parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default='../runs/log', type=str, help='log dir')
+parser.add_argument('--checkpoint_path', default='/drive/work_dirs/crowd_counting_shanghai_b/', type=str, help='checkpoint path')
+parser.add_argument('--log_dir', default='/drive/work_dirs/crowd_counting_shanghai_b/logs/', type=str, help='log dir')
 parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
 
 # MODEL
@@ -260,16 +260,18 @@ def main():
         os.mkdir(args.checkpoint_path)
     args.checkpoint_path += 'checkpoint.pth.tar'
 
+    print(args.train_json)
     if args.exp == 'shanghai':
         with open(args.train_json, 'r') as outfile:        
             train_list = json.load(outfile)
         with open(args.val_json, 'r') as outfile:       
             val_list = json.load(outfile)
 
-        train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in train_list]
-        val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in val_list]
+        train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/drive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in train_list]
+        val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/drive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in val_list]
 
     if args.use_gpu:
+        print(args.device)
         os.environ['CUDA_VISIBLE_DEVICES'] = args.device
         torch.cuda.manual_seed(time.time())
         CUDA =True
