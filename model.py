@@ -22,9 +22,6 @@ class Model(nn.Module):
         initialize_weights(self)
         self.info()
     
-    def info(self, verbose=False):  # print model information
-        model_info(self, verbose)
-
     def forward(self, x, training=True):
         y, dt = [], []  # outputs
         for m in self.model:
@@ -40,8 +37,12 @@ class Model(nn.Module):
         return x
 
 
+    def info(self, verbose=False):  # print model information
+        model_info(self, verbose)
+
+
 def model_info(model, verbose=False, img_size=640):
-    # Model information. img_size may be int or list, i.e. img_size=640 or img_size=[640, 320]
+    # Model information. 
     n_p = sum(x.numel() for x in model.parameters())  # number parameters
     n_g = sum(x.numel() for x in model.parameters() if x.requires_grad)  # number gradients
     if verbose:
@@ -109,7 +110,7 @@ def parse_model(d):  # model_dict, input_channels(3)
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         np = sum([x.numel() for x in m_.parameters()])  # number params
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
-        print('%3s%18s%3s%10.0f  %-40s%-30s' % (i, f, n, np, t, args))  # print
+        print('%3s%18s%3s%10.0f  %-40s%-30s' % (i, f, n, np, t, args))  
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         if i == 0:
@@ -129,6 +130,7 @@ class Detect(nn.Module):
     def forward(self, x, inference):
 
         x = self.m[0](x[0])  # conv
+        
         bs, _, ny, nx = x.shape
         x = x.view(bs, ny, nx)
 
@@ -186,24 +188,23 @@ class ComputeLoss:
         BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
 
         det = model.model[-1]  # Detect() module
-        self.ssi = list(det.stride).index(16) if autobalance else 0  # stride 16 index
+        self.ssi = list(det.stride).index(16) if autobalance else 0  
         self.BCEobj = BCEobj
         
 
-    def __call__(self, p, targets):  # predictions, targets, model
+    def __call__(self, p, targets): 
         device = targets.device
         lobj = torch.zeros(1, device=device)
-        indices = self.build_targets(p, targets)  # targets
+        indices = self.build_targets(p, targets) 
 
         # Losses
-        b, gj, gi = indices[0]  # image, anchor, gridy, gridx
-        tobj = torch.zeros_like(p, device=device)  # target obj
+        b, gj, gi = indices[0]  
+        tobj = torch.zeros_like(p, device=device)  
 
-        n = b.shape[0]  # number of targets
+        n = b.shape[0]  
         if n:
 
-            # Objectness
-            tobj[b, gj, gi] = 1 
+            tobj[b, gi, gj] = 1 
         
         obji = self.BCEobj(p, tobj)
         
@@ -214,7 +215,7 @@ class ComputeLoss:
         return lobj * bs, lobj.detach()
 
     def build_targets(self, p, targets):
-        # Build targets for compute_loss(), input targets(image,class,x,y,w,h)
+        # Build targets for compute_loss()
         indices = []
 
         gain = torch.ones(3, device=targets.device)  # normalized to gridspace gain
@@ -225,10 +226,11 @@ class ComputeLoss:
         b = t[:, 0].long().T  # image, class
         gxy = t[:, 1:]  # grid xy
 
+
         gij = gxy.long()
         gi, gj = gij.T  # grid xy indices
 
-        indices.append((b, gj, gi))  # image, anchor, grid indices (centers)
+        indices.append((b, gj, gi))  
 
 
         return indices

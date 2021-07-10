@@ -1,7 +1,6 @@
 import os
 import argparse
 import time
-from pathlib import Path
 import json
 import numpy as np
 import torch
@@ -40,11 +39,11 @@ parser.add_argument('--threshold', default=0.9, type=int, help="threshold for th
 
 # TRAINING
 parser.add_argument('--batch_size', default=256, type=int)
-parser.add_argument('--epochs', default=300, type=int, help="Number of epochs to train for")
+parser.add_argument('--epochs', default=1000, type=int, help="Number of epochs to train for")
 parser.add_argument('--workers', default=4, type=int, help="Number of workers in loading dataset")
 parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
-parser.add_argument('--lr0', default=0.001, type=float, help="initial learning rate")
+parser.add_argument('--lr0', default=0.0001, type=float, help="initial learning rate")
 parser.add_argument('--weight_decay', default=0.0005, type=float, help="weight_decay")
 parser.add_argument('--momentum', default=0.937, type=float, help="momentum")
 parser.add_argument('--adam', default=False, type=bool, help='use torch.optim.Adam() optimizer') 
@@ -125,7 +124,7 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
                             tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
 
                         pred = model(imgs, training=True)  # forward
-                        loss, _ = compute_loss(pred, targets)  # loss scaled by batch_size
+                        loss, _ = compute_loss(pred, targets) 
 
                         losses.update(loss.item(), imgs.size(0))
 
@@ -157,7 +156,7 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
         
         save_checkpoint({
             'epoch': epoch,
-            'arch': args.pre,
+            'arch': args.checkpoint_path,
             'state_dict': model.state_dict(),
             'best_pred': args.best_pred,
             'optimizer' : optimizer.state_dict(),}, is_best, args.checkpoint_path)
@@ -230,7 +229,8 @@ def validate(args, val_list, model, CUDA, compute_loss):
                         loss, _ = compute_loss(pred, targets)  # loss scaled by batch_size
 
                         losses.update(loss.item(), imgs.size(0))
-                        pred = pred > args.threshold
+                        
+                        #pred = pred > args.threshold
                         pred = pred.sum()
 
                         targets = targets.shape[0]
@@ -256,7 +256,7 @@ def main():
     tb_writer = SummaryWriter(args.log_dir)
 
     args.checkpoint_path += ('/'+args.model_desc)
-    if not Path(args.checkpoint_path).exists():
+    if not pathlib.Path(args.checkpoint_path).exists():
         os.mkdir(args.checkpoint_path)
     args.checkpoint_path += 'checkpoint.pth.tar'
 
@@ -301,17 +301,17 @@ def main():
     optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
     del pg0, pg1, pg2
 
-    if args.pre and args.use_pre:
-        if os.path.isfile(args.pre):
-            print("=> loading checkpoint '{}'".format(args.pre))
-            checkpoint = torch.load(args.pre)
+    if args.use_pre:
+        if os.path.isfile(args.checkpoint_path):
+            print("=> loading checkpoint '{}'".format(args.checkpoint_path))
+            checkpoint = torch.load(args.checkpoint_path)
             args.start_epoch = checkpoint['epoch']+1
             args.best_pred = checkpoint['best_pred']
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})".format(args.pre, checkpoint['epoch']))
+            print("=> loaded checkpoint '{}' (epoch {})".format(args.checkpoint_path, checkpoint['epoch']))
         else:
-            print("=> no checkpoint found at '{}'".format(args.pre))
+            print("=> no checkpoint found at '{}'".format(args.checkpoint_path))
 
 
     train(args, model, optimizer, train_list, val_list, tb_writer, CUDA) 
