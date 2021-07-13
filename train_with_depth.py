@@ -271,13 +271,11 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
 
                     if i == (ni-1) and j == (nj-1):
                         imgs = torch.stack(imgs, dim=0).squeeze(1)
-                        imgs_depth = torch.stack(imgs_depth, dim=0).squeeze(1)
                         targets = [ti for ti in targets if len(ti) != 0]
                         targets = torch.cat(targets)
 
                         if CUDA:
                             imgs = imgs.cuda()
-                            imgs_depth = imgs_depth.cuda()
                             targets = targets.cuda()
 
                         with torch.no_grad():
