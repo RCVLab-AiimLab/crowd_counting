@@ -18,44 +18,21 @@ def save_checkpoint(state, is_best, filename='../checkpoint.pth.tar'):
 def zeropad(img, h, w, target=False):
     if not target:
         color = [0, 0, 0]
+        # print('before pad',img[10])
         padded = cv2.copyMakeBorder(img, 0, h, 0, w, cv2.BORDER_CONSTANT, value=color)
+        # print('pad',padded[10])
     else:
         padded = cv2.copyMakeBorder(img, 0, h, 0, w, cv2.BORDER_CONSTANT, value=0)
     return padded
 
-def vis_input(im, target, predicted=None, thresholded=None):
-    if (predicted is not None) and (thresholded is not None):
-        i = 4
-    elif (predicted is not None) or (thresholded is not None):
-        i = 3
-    else:
-        i = 2
-
-    if im.size(0) == 3:
-        im = im.permute(1, 2, 0).cpu()
-        im = cv2.normalize(np.float32(im), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-        im = im.astype(np.uint8)
-    else:
-        im = im.cpu().numpy()
-
-    plt.subplot(1,i,1).imshow(im)
-    target = target.squeeze(0) if target.size(0)==1 else target
-    plt.subplot(1,i,2).imshow(target, cmap=CM.jet)
-    count = target.sum()
-    plt.title('People count: ' + str(count.item()))
-
-    if predicted is not None:
-        predicted = predicted.cpu().numpy()
-        plt.subplot(1,i,3).imshow(predicted, cmap=CM.jet)
-        count = predicted.sum()
-        plt.title('Probability map: ' + str(count.item()))
-    
-    if thresholded is not None:
-        thresholded = thresholded.cpu().numpy()
-        plt.subplot(1,i,4).imshow(thresholded, cmap=CM.jet)
-        count = thresholded.sum()
-        plt.title('Predicted count (thresholded): ' + str(count.item()))
-
+def vis_input(img, target):
+    im = img[0,...].permute(1, 2, 0).cpu()
+    im = cv2.normalize(np.float32(im), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    im = im.astype(np.uint8)
+    plt.subplot(121).imshow(im)
+    plt.subplot(122).imshow(target.squeeze(0), cmap=CM.jet)
+    count = np.sum(target.numpy().squeeze(0))
+    plt.title('People count: ' + str(count))
     plt.show()
 
 

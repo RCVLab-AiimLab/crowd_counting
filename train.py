@@ -20,18 +20,19 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiA, darknet, countInCell, lr=1e-5/', help="Set model description")
-parser.add_argument('--train_json', default=path/'datasets/shanghai/part_A_train.json', help='path to train json')
-parser.add_argument('--val_json', default=path/'datasets/shanghai/part_A_val.json', help='path to test json')
-parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
+parser.add_argument('--model_desc', default='shanghaiB_darknet_lr=1e-3/', help="Set model description")
+parser.add_argument('--train_json', default=os.path.join(path,'datasets/shanghai/part_B_train.json'), help='path to train json')
+parser.add_argument('--val_json', default=os.path.join(path,'datasets/shanghai/part_B_val.json'), help='path to test json')
+parser.add_argument('--pre', '-p', default=os.path.join(path,'runs/weights/checkpoint.pth.tar'), type=str, help='path to the pretrained model')
+parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
-parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default='../runs/log', type=str, help='log dir')
+parser.add_argument('--device', default='7', type=str, help='GPU id to use.')
+parser.add_argument('--checkpoint_path', default=os.path.join(path,'runs/weights'), type=str, help='checkpoint path')
+parser.add_argument('--log_dir', default=os.path.join(path,'runs/log'), type=str, help='log dir')
 parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
 
 # MODEL
-parser.add_argument('--model_file', default='model.yaml')
+parser.add_argument('--model_file', default=os.path.join(path,'model.yaml'))
 parser.add_argument('--cell_size', default=64, type=int, help="cell size")
 parser.add_argument('--threshold', default=0.9, type=int, help="threshold for the classification output")
 
@@ -69,7 +70,7 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
         end = time.time()
 
         model.train()
-
+        
         pbar = enumerate(train_loader)
         pbar = tqdm(pbar, total=len(train_loader))  # progress bar
 
@@ -102,12 +103,11 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
             
                     if args.vis:
                         vis_input(img_chip, target_chip)
-
+                    # print('target chip shape is',target_chip.shape)
                     coord = (target_chip.squeeze(0)).nonzero(as_tuple=False)
 
                     bxy = [[b_num, yb/length, xb/length] for (yb, xb) in coord]
                     targets.append(torch.tensor(bxy))
-
                     img = Variable(img_chip)
                     imgs.append(img)
                     b_num += 1
@@ -234,6 +234,10 @@ def validate(args, val_list, model, CUDA, compute_loss):
 
                         with torch.no_grad():
                             predictions = model(imgs, training=False)
+                            # print(predictions.shape)
+                            # print(predictions)
+                            # print(targets.shape)
+                            # print(targets)
                             loss, _, _ = compute_loss(predictions, targets)  # loss scaled by batch_size
 
                             losses.update(loss.item(), imgs.size(0))
@@ -267,8 +271,8 @@ def main():
     args = parser.parse_args()
 
     args.best_pred = 1e6
-
-    args.log_dir += ('/'+args.model_desc)
+    args.log_dir = os.path.join(args.log_dir,args.model_desc)
+    # args.log_dir += ('/'+args.model_desc)
     tb_writer = SummaryWriter(args.log_dir)
 
     args.checkpoint_path += ('/'+args.model_desc)
@@ -282,8 +286,8 @@ def main():
         with open(args.val_json, 'r') as outfile:       
             val_list = json.load(outfile)
 
-        train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in train_list]
-        val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in val_list]
+        train_list = [st.replace('/home/leeyh/Downloads/Shanghai', 'crowdcounting_main/datasets/shanghai') for st in train_list]
+        val_list = [st.replace('/home/leeyh/Downloads/Shanghai', 'crowdcounting_main/datasets/shanghai') for st in val_list]
 
     if args.use_gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.device

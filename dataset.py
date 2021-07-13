@@ -1,26 +1,38 @@
 import os
 import random
-import h5py
 import torch
 import numpy as np
 from torch.utils.data import Dataset
 from PIL import Image
+from image import *
 import torchvision.transforms.functional as F
+# from torchvision import datasets, transforms
 
 class listDataset(Dataset):
-    def __init__(self, root, shape=None, shuffle=True, transform=None,  train=False, seen=0, batch_size=1, num_workers=4):
+    def __init__(self, root, depthroot, shape=None, depth=False, shuffle=True, transform1=None, transform2=None, train=False, seen=0, batch_size=1, num_workers=4, img_size=512):
+        # depthroot = [st.replace('/home/leeyh/Downloads/Shanghai/part_A_final/train_data/images', 'crowdcounting_main/datasets/shanghai/part_A_final/train_data/depth_resized') for st in depthroot]
+        
+        if shuffle==True:
+            main_root = list(zip(root, depthroot))
+            random.shuffle(main_root)
+            root, depthroot = zip(*main_root)
         if train:
             root = root *4
-        random.shuffle(root)
-        
+            depthroot = depthroot *4
+        # random.shuffle(root)
+        # print(root)
         self.nSamples = len(root)
         self.lines = root
-        self.transform = transform
+        self.depthlines = depthroot
+        self.transform1 = transform1
+        self.transform2 = transform2
         self.train = train
+        self.depth = depth
         self.shape = shape
         self.seen = seen
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.img_size = img_size
         
     def __len__(self):
         return self.nSamples
@@ -28,8 +40,11 @@ class listDataset(Dataset):
         assert index <= len(self), 'index range error' 
         
         img_path = self.lines[index]
-        
-        img, target = load_data(img_path, self.train)
+        img_depth_path = self.depthlines[index]
+
+        img, target = load_data(img_path, self.train, False, self.img_size)
+
+        img_depth = load_data(img_depth_path, self.train, True, self.img_size)
         
         #img = 255.0 * F.to_tensor(img)
         
@@ -37,15 +52,9 @@ class listDataset(Dataset):
         #img[1,:,:]=img[1,:,:]-95.2757037428
         #img[2,:,:]=img[2,:,:]-104.877445883
 
-        if self.transform is not None:
-            img = self.transform(img)
-        return img,target
-
-
-def load_data(img_path, train=True):
-    gt_path = img_path.replace('.jpg','_nofilter.h5').replace('images','ground_truth')
-    img = Image.open(img_path).convert('RGB')
-    gt_file = h5py.File(gt_path)
-    target = np.asarray(gt_file['density'])
-
-    return img, target
+        if self.transform1 is not None:
+            img = self.transform1(img)
+        if self.transform2 is not None:
+            img_depth = self.transform2(img_depth)
+        
+        return img, target, img_depth
