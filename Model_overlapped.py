@@ -52,28 +52,42 @@ def Shift_grid(x):
     return x
 
 def Max_probability(x):
+    #X_ch2 is the second channel of output and it will be concatentated at the end
     x_ch2,_,_ = torch.chunk(x[:,1,:,:], chunks=3, dim=1)
+    #The first channel has three probablity maps (original grid, shift right and shift down)
     x_p,x_pr,x_pd = torch.chunk(x[:,0,:,:], chunks=3, dim=1)
-
+    
+    #x_p_sr is the probability map shifted to the right 
     x_p_sr = nn.functional.pad(x_p, (1,0,0,0), mode='constant', value=0)
     x_p_sr = x_p_sr[:,:,0:-1]
+    
+    #Check if overllaped probability (X_pr) is greater than shifted probability(X_p_sr)
     x_pr_greater_x_p_sr = torch.gt(x_pr,x_p_sr).type(torch.float)
+
+    #Keep x_pr where it is larger than x_p_sr
     x_comp_r = x_pr*x_pr_greater_x_p_sr
-    xr = torch.cat((x_p,x_comp_r), dim=0)
-    xr = torch.amax(xr,dim=0)
-    xr = torch.unsqueeze(xr, dim=0)
+
+    x_p = torch.unsqueeze(x_p, dim=1)
+    x_comp_r = torch.unsqueeze(x_comp_r, dim=1)
+    #Now x_p and x_comp_r are conateneated in channel dimiention and maximum is kept
+    xr = torch.cat((x_p,x_comp_r), dim=1)
+    xr = torch.amax(xr,dim=1)
+    x_p = x_p[:,0,:,:]
+
 
     x_p_sd = nn.functional.pad(x_p, (0,0,1,0), mode='constant', value=0)
     x_p_sd = x_p_sd[:,0:-1,:]
     x_pd_greater_x_p_sd = torch.gt(x_pd,x_p_sd).type(torch.float)
     x_comp_d = x_pd*x_pd_greater_x_p_sd
-    xd = torch.cat((x_p,x_comp_d), dim=0)
-    xd = torch.amax(xd,dim=0)
-    xd = torch.unsqueeze(xd, dim=0)
+    x_p = torch.unsqueeze(x_p, dim=1)
+    x_comp_d = torch.unsqueeze(x_comp_d, dim=1)
+    xd = torch.cat((x_p,x_comp_d), dim=1)
+    xd = torch.amax(xd,dim=1)
 
-    x = torch.cat((xr,xd), dim=0)
-    x = torch.amax(x,dim=0)
-    x = torch.unsqueeze(x, dim=0)
+    xr = torch.unsqueeze(xr, dim=1)
+    xd = torch.unsqueeze(xd, dim=1)
+    x = torch.cat((xr,xd), dim=1)
+    x = torch.amax(x,dim=1)
     x = torch.unsqueeze(x, dim=1)
     x_ch2 = torch.unsqueeze(x_ch2, dim=1)
     x = torch.cat((x,x_ch2), dim=1)
@@ -278,4 +292,3 @@ class ComputeLoss:
 
 
         return indices
-
