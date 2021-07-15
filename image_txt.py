@@ -13,7 +13,7 @@ def load_data(img_path, train=True, depth=False, img_size=512):
     else:
         # img = np.loadtxt(img_path, dtype='float')
         h5 = h5py.File(img_path,'r')
-        img = h5['depth'] 
+        img = h5['depth'][:] 
     #######
     #img = img.resize((img_size, img_size), Image.ANTIALIAS)
     #######
