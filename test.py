@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 parser.add_argument('--model_desc', default='shanghaiA, cell128/', help="Set model description")
 parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
-parser.add_argument('--exp_sets', default='part_A_final/test_data')
+parser.add_argument('--exp_sets', default='part_A_final/train_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
@@ -152,7 +152,7 @@ def test():
                                 
                                 if args.vis_patch:
                                     im_i = imgs.size(0)//4
-                                    vis_input(imgs[im_i, ...], target_chips[im_i, ...], predicted=predictions[im_i, 0, ...], thresholded=predictions[im_i, 0, ...] > args.threshold)
+                                    vis_input(imgs[im_i, ...], target_chips[im_i, ...], predicted=predictions[im_i, :, :, 0], thresholded=predictions[im_i, :, :, 0] > args.threshold)
                             
                                 targets = targets.shape[0]
                                 pred_prob = predictions[..., 0].sum()

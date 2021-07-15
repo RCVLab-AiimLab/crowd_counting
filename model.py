@@ -238,7 +238,7 @@ class ComputeLoss:
         lcell += self.MSELoss(p[..., 1], tcell)
         countInCell = p[..., 0].view(p.size(0), -1).sum(1, keepdim=True)
         countInCell_gt = tcell.view(p.size(0), -1).mean(1, keepdim=True)
-        lcountInCell += torch.abs(countInCell - countInCell_gt).mean()
+        #lcountInCell += torch.abs(countInCell - countInCell_gt).mean()  
 
         bs = tobj.shape[0]  # batch size
 
