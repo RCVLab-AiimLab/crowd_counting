@@ -308,10 +308,10 @@ def main():
         train_list = [st.replace('/home/leeyh/Downloads/Shanghai/part_B_final/train_data/images', 'crowdcounting_main/datasets/shanghai/part_B_final/train_data/images') for st in train_list_fab]
         val_list = [st.replace('/home/leeyh/Downloads/Shanghai/part_B_final/test_data/images', 'crowdcounting_main/datasets/shanghai/part_B_final/test_data/images') for st in val_list_fab]
         
-        train_list_depth = [st.replace('/home/leeyh/Downloads/Shanghai/part_B_final/train_data/images', 'crowdcounting_main/datasets/shanghai/part_B_final/train_data/depth_resized_txt') for st in train_list_fab]
-        val_list_depth = [st.replace('/home/leeyh/Downloads/Shanghai/part_B_final/test_data/images', 'crowdcounting_main/datasets/shanghai/part_B_final/test_data/depth_resized_txt') for st in val_list_fab]
-        train_list_depth = [st.replace('.jpg', '.txt') for st in train_list_depth]
-        val_list_depth = [st.replace('.jpg', '.txt') for st in val_list_depth]
+        train_list_depth = [st.replace('/home/leeyh/Downloads/Shanghai/part_B_final/train_data/images', 'crowdcounting_main/datasets/shanghai/part_B_final/train_data/depth_resized_h5') for st in train_list_fab]
+        val_list_depth = [st.replace('/home/leeyh/Downloads/Shanghai/part_B_final/test_data/images', 'crowdcounting_main/datasets/shanghai/part_B_final/test_data/depth_resized_h5') for st in val_list_fab]
+        train_list_depth = [st.replace('.jpg', '.h5') for st in train_list_depth]
+        val_list_depth = [st.replace('.jpg', '.h5') for st in val_list_depth]
         print(train_list_depth)
         print(train_list_depth)
 
