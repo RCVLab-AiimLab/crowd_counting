@@ -14,15 +14,16 @@ from dataset import listDataset
 from tqdm import tqdm
 import math
 from utils import save_checkpoint, AverageMeter, vis_input, zeropad
+import cv2
 
 
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiA, darknet, countInCell, lr=1e-5/', help="Set model description")
-parser.add_argument('--train_json', default=path/'datasets/shanghai/part_A_train.json', help='path to train json')
-parser.add_argument('--val_json', default=path/'datasets/shanghai/part_A_val.json', help='path to test json')
+parser.add_argument('--model_desc', default='shanghaiA, cell128/', help="Set model description")
+parser.add_argument('--train_json', default=path/'datasets/shanghai/part_A_train_with_val.json', help='path to train json')
+parser.add_argument('--val_json', default=path/'datasets/shanghai/part_A_test.json', help='path to test json')
 parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
@@ -31,10 +32,9 @@ parser.add_argument('--log_dir', default='../runs/log', type=str, help='log dir'
 parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
 
 # MODEL
-parser.add_argument('--model_file', default='model.yaml')
-parser.add_argument('--cell_size', default=64, type=int, help="cell size")
-parser.add_argument('--threshold', default=0.9, type=int, help="threshold for the classification output")
-
+parser.add_argument('--model_file', default=path/'model.yaml')
+parser.add_argument('--cell_size', default=128, type=int, help="cell size")
+parser.add_argument('--threshold', default=0.1, type=int, help="threshold for the classification output")
 
 # TRAINING
 parser.add_argument('--batch_size', default=512, type=int)
@@ -42,7 +42,7 @@ parser.add_argument('--epochs', default=1000, type=int, help="Number of epochs t
 parser.add_argument('--workers', default=4, type=int, help="Number of workers in loading dataset")
 parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
-parser.add_argument('--lr0', default=0.00001, type=float, help="initial learning rate")
+parser.add_argument('--lr0', default=0.0001, type=float, help="initial learning rate")
 parser.add_argument('--weight_decay', default=0.0005, type=float, help="weight_decay")
 parser.add_argument('--momentum', default=0.937, type=float, help="momentum")
 parser.add_argument('--adam', default=False, type=bool, help='use torch.optim.Adam() optimizer') 
@@ -63,7 +63,8 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
 
         losses = AverageMeter()
         losses_obj = AverageMeter()
-        losses_num = AverageMeter()
+        losses_cell = AverageMeter()
+        losses_neighbor = AverageMeter()
         data_time = AverageMeter()
         batch_time = AverageMeter()
         end = time.time()
@@ -95,41 +96,46 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
                     img_chip = zeropad(img_chip.squeeze(0).permute(1,2,0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3])
                     img_chip = torch.from_numpy(img_chip).permute(2,0,1).unsqueeze(0)
                     target_chip = target_big[:, y1:y2, x1:x2]
-                    target_chip = zeropad(target_chip.squeeze(0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3], target=True)
+                    target_chip = zeropad(target_chip.squeeze(0).numpy(), length - target_chip.shape[1], length - target_chip.shape[2], target=True)
                     target_chip = torch.from_numpy(target_chip).unsqueeze(0)
                     assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
                     assert target_chip.shape[1] == target_chip.shape[2] == length, 'target size error'
             
                     if args.vis:
-                        vis_input(img_chip, target_chip)
+                        vis_input(img_big.squeeze(0), target_big.squeeze(0))
+                        vis_input(img_chip.squeeze(0), target_chip.squeeze(0))
 
                     coord = (target_chip.squeeze(0)).nonzero(as_tuple=False)
 
-                    bxy = [[b_num, yb/length, xb/length] for (yb, xb) in coord]
+                    bxy = [[b_num, yb/length, xb/length, i, j] for (yb, xb) in coord]
                     targets.append(torch.tensor(bxy))
 
                     img = Variable(img_chip)
                     imgs.append(img)
                     b_num += 1
 
-                    if b_num >= args.batch_size:
+                    #if b_num >= args.batch_size:
+                    if i == (ni-1) and j == (nj-1):
                         imgs = torch.stack(imgs, dim=0).squeeze(1)
                         targets = [ti for ti in targets if len(ti) != 0]
+                        if not targets:
+                            targets.append(torch.tensor([[-1, 0, 0]]))
                         targets = torch.cat(targets)
 
                         if CUDA:
                             imgs = imgs.cuda()
                             targets = targets.cuda()
                         
-                        if epoch <= 1:
-                            tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
+                        #if epoch <= 1:
+                        #    tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
 
                         pred = model(imgs, training=True)  # forward
-                        loss, lobj, lnum = compute_loss(pred, targets) 
+                        loss, lobj, lcell, lneighbor = compute_loss(pred, targets) 
 
                         losses.update(loss.item(), imgs.size(0))
                         losses_obj.update(lobj.item(), imgs.size(0))
-                        losses_num.update(lnum.item(), imgs.size(0))
+                        losses_cell.update(lcell.item(), imgs.size(0))
+                        losses_neighbor.update(lneighbor.item(), imgs.size(0))
 
                         optimizer.zero_grad()
                         loss.backward()
@@ -151,11 +157,11 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
 
             # end batch ------------
 
-        pred, predByNum, val_losses = validate(args, val_list, model, CUDA, compute_loss)
+        pred_prob, pred_thresh, pred_cell, val_losses = validate(args, val_list, model, CUDA, compute_loss)
 
-        is_best = pred < args.best_pred
-        args.best_pred = min(pred, args.best_pred)
-        print(' * best MAE {mae:.3f} '.format(mae=args.best_pred))
+        is_best = pred_prob < args.best_pred
+        args.best_pred = min(pred_prob, args.best_pred)
+        print(' * Best MAE {mae:.3f} '.format(mae=args.best_pred))
         
         save_checkpoint({
             'epoch': epoch,
@@ -166,10 +172,12 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
         
         tb_writer.add_scalar('train loss/total', losses.avg, epoch)
         tb_writer.add_scalar('train loss/obj', losses_obj.avg, epoch)
-        tb_writer.add_scalar('train loss/num', losses_num.avg, epoch)
+        tb_writer.add_scalar('train loss/cell', losses_cell.avg, epoch)
+        tb_writer.add_scalar('train loss/neighbor', losses_neighbor.avg, epoch)
         tb_writer.add_scalar('val loss/total', val_losses.avg, epoch)
-        tb_writer.add_scalar('MAE/average', pred, epoch)
-        tb_writer.add_scalar('MAE/averageByNum', predByNum, epoch)
+        tb_writer.add_scalar('MAE/by prob', pred_prob, epoch)
+        tb_writer.add_scalar('MAE/by threshold', pred_thresh, epoch)
+        tb_writer.add_scalar('MAE/cell', pred_cell, epoch)
 
         # end epoch ------------
 
@@ -187,8 +195,8 @@ def validate(args, val_list, model, CUDA, compute_loss):
     pbar = tqdm(pbar, total=len(val_loader))  # progress bar
     
     losses = AverageMeter()
-    mae = 0
-    maeByNum = 0
+    mae_prob, mae_thresh = 0, 0
+    mae_cell = 0
     length = args.cell_size
     imgs, targets = [], []
     b_num = 0
@@ -208,14 +216,14 @@ def validate(args, val_list, model, CUDA, compute_loss):
                     img_chip = zeropad(img_chip.squeeze(0).permute(1,2,0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3])
                     img_chip = torch.from_numpy(img_chip).permute(2,0,1).unsqueeze(0)
                     target_chip = target_big[:, y1:y2, x1:x2]
-                    target_chip = zeropad(target_chip.squeeze(0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3], target=True)
+                    target_chip = zeropad(target_chip.squeeze(0).numpy(), length - target_chip.shape[1], length - target_chip.shape[2], target=True)
                     target_chip = torch.from_numpy(target_chip).unsqueeze(0)
                     assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
                     assert target_chip.shape[1] == target_chip.shape[2] == length, 'target size error'
 
                     coord = (target_chip.squeeze(0)).nonzero(as_tuple=False)
 
-                    bxy = [[b_num, yb/length, xb/length] for (yb, xb) in coord]
+                    bxy = [[b_num, yb/length, xb/length, i, j] for (yb, xb) in coord]
                     targets.append(torch.tensor(bxy))
 
                     img = torch.clone(img_chip)
@@ -234,33 +242,40 @@ def validate(args, val_list, model, CUDA, compute_loss):
 
                         with torch.no_grad():
                             predictions = model(imgs, training=False)
-                            loss, _, _ = compute_loss(predictions, targets)  # loss scaled by batch_size
+                            loss, _, _, _ = compute_loss(predictions, targets)  # loss scaled by batch_size
 
                             losses.update(loss.item(), imgs.size(0))
                             
-                            #pred = pred > args.threshold
-                            pred = predictions[:, 0, :, :].sum()
-                            predByNum = predictions[:, 1, ...].view(predictions.size(0), -1).mean(1, keepdim=True)
-                            predByNum = predByNum.sum()
-
                             targets = targets.shape[0]
-                            
-                            mae += abs(pred - targets)
-                            maeByNum += abs(predByNum - targets)
+                            pred_prob = predictions[..., 0].sum()
+                            pred_thresh = (predictions[..., 0] > args.threshold).sum()
+                            pred_cell = (predictions[..., 1]).view(predictions.size(0), -1).mean(1, keepdim=True)
+                            pred_cell = pred_cell.sum()
 
-                            s = '*Target {targets:.2f}\t *Pred_prob {pred:.4f}\t *Pred_num {predByNum:.4f}\t MAE_prob {mae:.4f}\t *MAE_num {maeByNum:.4f}\n'.format(targets=targets, pred=pred, predByNum=predByNum, mae=(pred-targets), maeByNum=(predByNum-targets))
+                            mae_prob += abs(pred_prob - targets)
+                            mae_thresh += abs(pred_thresh - targets)
+                            mae_cell += abs(pred_cell - targets)
+
+                            s = '*Target {targets:.2f}\t *Pred_Prob {pred_prob:.4f}\t *Pred_Thresh {pred_thresh:.4f}\t *Pred_Cell {pred_cell:.4f}\t \
+                                *MAE_Prob {mae_prob:.4f}\t *MAE_Thresh {mae_thresh:.4f}\t *MAE_Cell {mae_cell:.4f} \n'.\
+                                format(targets=targets, pred_prob=pred_prob, pred_thresh=pred_thresh, pred_cell=pred_cell, \
+                                    mae_prob=(pred_prob-targets), mae_thresh=(pred_thresh-targets), mae_cell=(pred_cell-targets))
+                            
                             f.writelines(s)
 
                             imgs = []
                             targets = []
                             b_num = 0
         
-    mae = mae/len(val_loader)
-    maeByNum = maeByNum/len(val_loader)
-    print(' * MAE {mae:.3f} '.format(mae=mae))
-    print(' * MAEByNum {mae:.3f} '.format(mae=maeByNum))
+    mae_prob = mae_prob/len(val_loader)
+    mae_thresh = mae_thresh/len(val_loader)
+    mae_cell = mae_cell/len(val_loader)
 
-    return mae, maeByNum, losses       
+    print(' * MAE_Prob {mae_prob:.3f} '.format(mae_prob=mae_prob))
+    print(' * MAE_Thresh {mae_thresh:.3f} ({thresh:.3f}) '.format(mae_thresh=mae_thresh, thresh=args.threshold))
+    print(' * MAE_Cell {mae_cell:.3f} '.format(mae_cell=mae_cell))
+
+    return mae_prob, mae_thresh, mae_cell, losses       
 
 
 def main():

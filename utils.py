@@ -25,11 +25,11 @@ def zeropad(img, h, w, target=False):
 
 def vis_input(im, target, predicted=None, thresholded=None):
     if (predicted is not None) and (thresholded is not None):
-        i = 4
-    elif (predicted is not None) or (thresholded is not None):
-        i = 3
-    else:
         i = 2
+    elif (predicted is not None) or (thresholded is not None):
+        i = 2
+    else:
+        i = 1
 
     if im.size(0) == 3:
         im = im.permute(1, 2, 0).cpu()
@@ -38,23 +38,24 @@ def vis_input(im, target, predicted=None, thresholded=None):
     else:
         im = im.cpu().numpy()
 
-    plt.subplot(1,i,1).imshow(im)
+    plt.subplot(2,i,1).imshow(im)
     target = target.squeeze(0) if target.size(0)==1 else target
-    plt.subplot(1,i,2).imshow(target, cmap=CM.jet)
+    plt.subplot(2,i,2).imshow(target, cmap=CM.jet)
     count = target.sum()
     plt.title('People count: ' + str(count.item()))
 
     if predicted is not None:
         predicted = predicted.cpu().numpy()
-        plt.subplot(1,i,3).imshow(predicted, cmap=CM.jet)
+        plt.subplot(2,i,3).imshow(predicted, cmap=CM.jet)
+        #count = 1/predicted.mean()
         count = predicted.sum()
         plt.title('Probability map: ' + str(count.item()))
     
     if thresholded is not None:
         thresholded = thresholded.cpu().numpy()
-        plt.subplot(1,i,4).imshow(thresholded, cmap=CM.jet)
+        plt.subplot(2,i,4).imshow(thresholded, cmap=CM.jet)
         count = thresholded.sum()
-        plt.title('Predicted count (thresholded): ' + str(count.item()))
+        plt.title('Pred count (thresholded): ' + str(count.item()))
 
     plt.show()
 

@@ -10,7 +10,7 @@ import torchvision.transforms.functional as F
 class listDataset(Dataset):
     def __init__(self, root, shape=None, shuffle=True, transform=None,  train=False, seen=0, batch_size=1, num_workers=4):
         if train:
-            root = root *4
+            root = root * 4
         random.shuffle(root)
         
         self.nSamples = len(root)
@@ -24,6 +24,7 @@ class listDataset(Dataset):
         
     def __len__(self):
         return self.nSamples
+
     def __getitem__(self, index):
         assert index <= len(self), 'index range error' 
         
@@ -39,7 +40,8 @@ class listDataset(Dataset):
 
         if self.transform is not None:
             img = self.transform(img)
-        return img,target
+
+        return img, target
 
 
 def load_data(img_path, train=True):

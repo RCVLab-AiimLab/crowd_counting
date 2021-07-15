@@ -6,6 +6,7 @@ import yaml
 import torch
 import torch.nn as nn 
 import cv2 
+from itertools import product, starmap
 
 
         
@@ -72,9 +73,9 @@ def initialize_weights(model):
 def parse_model(d):  # model_dict, input_channels(3)
     print('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
 
-    gd, gw = d['depth_multiple'], d['width_multiple']
-    no = 1 
+    nc, gd, gw = d['nc'], d['depth_multiple'], d['width_multiple']
     ch = [3]
+    no = nc + 2  # number of outputs
     layers, save, c2 = [], [], ch[-1]
 
     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
@@ -101,8 +102,9 @@ def parse_model(d):  # model_dict, input_channels(3)
             c2 = sum([ch[x] for x in f])
         elif m is Detect:
             args.append([ch[x] for x in f])
-            #args[1] = [list(range(args[1] * 2))] * len(f)
-            args = [args[2]]
+            if isinstance(args[1], int): 
+                args[1] = [list(range(args[1] * 2))] * len(f)
+            #args = [args[2]]
 
         else:
             c2 = ch[f]
@@ -122,23 +124,25 @@ def parse_model(d):  # model_dict, input_channels(3)
 
 
 class Detect(nn.Module):
-    def __init__(self, ch=()):
-        super(Detect, self).__init__()
-        self.grid = [torch.zeros(1)]
-        self.m = nn.ModuleList(nn.Conv2d(x, 2, 1) for x in ch)  # output conv
-
+    def __init__(self, nc, ext, ch=()):
+        super(Detect, self).__init__() 
+        self.no = 2  # number of outputs
+        self.m = nn.ModuleList(nn.Conv2d(x, self.no, 1) for x in ch)  # output conv
 
     def forward(self, x, inference):
 
         x = self.m[0](x[0])  # conv
-        
-        #bs, _, ny, nx = x.shape
-        #x = x.view(bs, ny, nx)
-
-        if inference:  # inference
-            x[:, 0, :, :] = x[:, 0, :, :].sigmoid()#.squeeze()
+        bs, _, ny, nx = x.shape  
+        x = x.view(bs, self.no, ny, nx).permute(0, 2, 3, 1).contiguous()
+    
+        if inference:  
+            x[..., 0] = x[..., 0].sigmoid()
 
         return x
+
+
+    def forward(self, x):
+        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
 
 class Conv(nn.Module):
@@ -186,6 +190,7 @@ class ComputeLoss:
         device = next(model.parameters()).device  # get model device
 
         # Define criteria
+        self.BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
         self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
         self.MSELoss = nn.MSELoss()
         
@@ -193,44 +198,68 @@ class ComputeLoss:
     def __call__(self, p, targets): 
         device = targets.device
         lobj = torch.zeros(1, device=device)
-        lnum = torch.zeros(1, device=device)
-        indices = self.build_targets(p, targets) 
+        lcell = torch.zeros(1, device=device)
+        lcountInCell = torch.zeros(1, device=device)
+        lcountInNbr = torch.zeros(1, device=device)
+        indices, neighbors = self.build_targets(p, targets) 
 
         # Losses
         b, gj, gi = indices[0]  
-        tobj = torch.zeros_like(p[:, 0, :, :], device=device)  
-        tnum = torch.zeros_like(p[:, 0, :, :], device=device)  
+        tobj = torch.zeros_like(p[..., 0], device=device)  
+        tcell = torch.zeros_like(p[..., 0], device=device)   
 
         n = b.shape[0]  
         if n:
-
             tobj[b, gi, gj] = 1 
-            nonempty, count = torch.unique(b, return_counts=True) 
-            for k, bi in enumerate(nonempty):
-                tnum[bi, :, :] = count[k] 
-        
-        obji = self.BCEobj(p[:, 0, :, :], tobj)
-        numi = self.MSELoss(p[:, 1, :, :], tnum)
 
-        lobj += obji  
-        lnum += numi
+            nonempty, count = torch.unique(b, return_counts=True) 
+            nbrs_coord = []
+            for bi in nonempty:
+                ind = torch.where(b==bi)[0]
+                nbrs_coord.append(neighbors[ind[0], :])
+            nbrs_coord = torch.stack(nbrs_coord)
+            nbrs_cell = torch.ones((len(nbrs_coord), 8)) * (-1)
+            for bi in range(len(nbrs_coord)):
+                coords = nbrs_coord[bi].view(-1, 2)
+                for i in range(len(nbrs_coord)):
+                    for j in range(1,9):
+                        if nbrs_coord[i, 0] == coords[j, 0] and nbrs_coord[i, 1] == coords[j, 1]:
+                            nbrs_cell[bi, j-1] = nonempty[i]
+
+            for k, bi in enumerate(nonempty):
+                tcell[bi, :, :] = float(count[k])
+                nbr = nbrs_cell[k, nbrs_cell[k,:] >= 0]
+                CountInNbr_gt = torch.clone(count[k])
+                countInNbr = torch.clone(p[bi, :, :, 1].mean())
+                for i in nbr:
+                    ind = torch.where(nonempty==i)[0][0]
+                    CountInNbr_gt += torch.clone(count[ind])
+                    countInNbr += torch.clone(p[ind, :, :, 1].mean())
+
+                lcountInNbr += torch.abs(countInNbr - CountInNbr_gt).mean()
+
+        lobj += self.BCEobj(p[..., 0], tobj)
+        lcell += self.MSELoss(p[..., 1], tcell)
+        countInCell = p[..., 0].view(p.size(0), -1).sum(1, keepdim=True)
+        countInCell_gt = tcell.view(p.size(0), -1).mean(1, keepdim=True)
+        lcountInCell += torch.abs(countInCell - countInCell_gt).mean()
 
         bs = tobj.shape[0]  # batch size
 
-        return (lobj * bs) + lnum, lobj.detach(), lnum.detach()
+        return (lobj * bs) + lcell + lcountInCell + lcountInNbr, lobj.detach(), lcell.detach(), lcountInNbr.detach()
 
 
     def build_targets(self, p, targets):
         # Build targets for compute_loss()
         indices = []
 
-        gain = torch.ones(3, device=targets.device)  # normalized to gridspace gain
+        gain = torch.ones(5, device=targets.device)  # normalized to gridspace gain
         
-        gain[1:3] = torch.tensor(p.shape)[[3, 2]]  # xyxy gain
+        gain[1:3] = torch.tensor(p.shape)[[2, 1]]  # xyxy gain
         t = targets * gain
 
         b = t[:, 0].long().T  # image, class
-        gxy = t[:, 1:]  # grid xy
+        gxy = t[:, 1:3]  # grid xy
 
 
         gij = gxy.long()
@@ -238,7 +267,17 @@ class ComputeLoss:
 
         indices.append((b, gj, gi))  
 
+        nij = t[:, 3:]
+        bi, bj = nij.T
+        cells = starmap(lambda a,b: (bi+a, bj+b), product((0,-1,+1), (0,-1,+1)))
+        nbr = list(cells)
+        neighbors = []
+        for i in nbr: 
+            for j in i: 
+                neighbors.append(j)
 
-        return indices
+        neighbors = torch.stack(neighbors).T
+
+        return indices, neighbors
 
 
