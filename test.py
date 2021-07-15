@@ -32,7 +32,7 @@ parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, he
 parser.add_argument('--log_dir', default='../runs/log', type=str, help='log dir')
 
 # MODEL
-parser.add_argument('--model_file', default='model.yaml')
+parser.add_argument('--model_file', default=path/'model.yaml')
 parser.add_argument('--cell_size', default=128, type=int, help="cell size")
 parser.add_argument('--threshold', default=0.1, type=int, help="threshold for the classification output")
 

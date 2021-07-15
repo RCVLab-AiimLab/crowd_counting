@@ -24,7 +24,7 @@ class Model(nn.Module):
         self.info()
     
     def forward(self, x, training=True):
-        y, dt = [], []  # outputs
+        y = []  # outputs
         for m in self.model:
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
@@ -75,7 +75,7 @@ def parse_model(d):  # model_dict, input_channels(3)
 
     nc, gd, gw = d['nc'], d['depth_multiple'], d['width_multiple']
     ch = [3]
-    no = nc + 2  # number of outputs
+    no = 2  # number of outputs
     layers, save, c2 = [], [], ch[-1]
 
     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
@@ -139,10 +139,6 @@ class Detect(nn.Module):
             x[..., 0] = x[..., 0].sigmoid()
 
         return x
-
-
-    def forward(self, x):
-        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
 
 class Conv(nn.Module):
