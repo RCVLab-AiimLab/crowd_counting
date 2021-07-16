@@ -21,15 +21,16 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiA, cell128/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA, cell128, depth/', help="Set model description")
 parser.add_argument('--train_json', default=path/'datasets/shanghai/part_A_train_with_val.json', help='path to train json')
 parser.add_argument('--val_json', default=path/'datasets/shanghai/part_A_test.json', help='path to test json')
-parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
+parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default='../runs/log', type=str, help='log dir')
+parser.add_argument('--checkpoint_path', default=path.parent/'runs/weights', type=str, help='checkpoint path')
+parser.add_argument('--log_dir', default=path.parent/'runs/log', type=str, help='log dir')
 parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
+parser.add_argument('--depth', default=True, type=bool, help='using depth?')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
@@ -48,14 +49,17 @@ parser.add_argument('--momentum', default=0.937, type=float, help="momentum")
 parser.add_argument('--adam', default=False, type=bool, help='use torch.optim.Adam() optimizer') 
 
 
-def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
+def train(args, model, optimizer, train_list, val_list, train_list_depth, val_list_depth, tb_writer, CUDA):
 
     compute_loss = ComputeLoss(model)
     
     for epoch in range(args.start_epoch, args.epochs):
         train_loader = torch.utils.data.DataLoader(listDataset(train_list,
+                       train_list_depth,
                        shuffle=True,
-                       transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
+                       depth=args.depth,
+                       transform1=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
+                       transform2=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.502], std=[0.291]),]), 
                        train=True, 
                        seen=0,
                        batch_size=1,
@@ -80,7 +84,7 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
         length = args.cell_size
         b_num = 0
 
-        for bi, (img_big, target_big) in pbar:  # batch ----------
+        for bi, (img_big, target_big, img_big_depth) in pbar:  # batch ----------
             data_time.update(time.time() - end)
 
             ni = int(math.ceil(img_big.shape[2] / length)) 
@@ -95,23 +99,40 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
                     img_chip = img_big[:, :, y1:y2, x1:x2]
                     img_chip = zeropad(img_chip.squeeze(0).permute(1,2,0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3])
                     img_chip = torch.from_numpy(img_chip).permute(2,0,1).unsqueeze(0)
+                    
+                    if args.depth:
+                        img_chip_depth = img_big_depth[:, :, y1:y2, x1:x2]
+                        img_chip_depth  = zeropad(img_chip_depth.squeeze(0).permute(1,2,0).numpy(), length - img_chip_depth.shape[2], length - img_chip_depth.shape[3])
+                        img_chip_depth = torch.from_numpy(img_chip_depth).unsqueeze(2)
+                        img_chip_depth = img_chip_depth.permute(2,0,1).unsqueeze(0)
+                        assert img_chip_depth.shape[2] == img_chip_depth.shape[3] == length, 'image size error'
+                    
                     target_chip = target_big[:, y1:y2, x1:x2]
                     target_chip = zeropad(target_chip.squeeze(0).numpy(), length - target_chip.shape[1], length - target_chip.shape[2], target=True)
                     target_chip = torch.from_numpy(target_chip).unsqueeze(0)
+                    
                     assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
                     assert target_chip.shape[1] == target_chip.shape[2] == length, 'target size error'
             
                     if args.vis:
                         vis_input(img_big.squeeze(0), target_big.squeeze(0))
                         vis_input(img_chip.squeeze(0), target_chip.squeeze(0))
+                        if args.depth:
+                            vis_input(img_big_depth.squeeze(0), img_chip_depth.squeeze(0))
 
                     coord = (target_chip.squeeze(0)).nonzero(as_tuple=False)
 
                     bxy = [[b_num, yb/length, xb/length, i, j] for (yb, xb) in coord]
                     targets.append(torch.tensor(bxy))
 
-                    img = Variable(img_chip)
+                    if args.depth:
+                        img = torch.cat((img_chip ,img_chip_depth), dim=1)
+                    else:
+                        img = torch.clone(img_chip)
+
+                    img = Variable(img)
                     imgs.append(img)
+
                     b_num += 1
 
                     #if b_num >= args.batch_size:
@@ -157,7 +178,7 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
 
             # end batch ------------
 
-        pred_prob, pred_thresh, pred_cell, val_losses = validate(args, val_list, model, CUDA, compute_loss)
+        pred_prob, pred_thresh, pred_cell, val_losses = validate(args, val_list, val_list_depth, model, CUDA, compute_loss)
 
         is_best = pred_prob < args.best_pred
         args.best_pred = min(pred_prob, args.best_pred)
@@ -182,10 +203,14 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
         # end epoch ------------
 
 
-def validate(args, val_list, model, CUDA, compute_loss):
+def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
     print ('begin validation')
     val_loader = torch.utils.data.DataLoader(listDataset(val_list, 
-                    shuffle=False, transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
+                    val_list_depth,
+                    shuffle=False, 
+                    depth=args.depth,
+                    transform1=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
+                    transform2=transforms.Compose([transforms.ToTensor(),]), 
                     train=False), 
                     batch_size=1)    
     
@@ -202,7 +227,7 @@ def validate(args, val_list, model, CUDA, compute_loss):
     b_num = 0
 
     with open(args.log_dir + 'results.txt', 'w') as f:
-        for bi, (img_big, target_big) in pbar:  
+        for bi, (img_big, target_big, img_big_depth) in pbar:  
             ni = int(math.ceil(img_big.shape[2] / length))  
             nj = int(math.ceil(img_big.shape[3] / length)) 
             for i in range(ni):  
@@ -215,9 +240,18 @@ def validate(args, val_list, model, CUDA, compute_loss):
                     img_chip = img_big[:, :, y1:y2, x1:x2]
                     img_chip = zeropad(img_chip.squeeze(0).permute(1,2,0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3])
                     img_chip = torch.from_numpy(img_chip).permute(2,0,1).unsqueeze(0)
+                    
+                    if args.depth:
+                        img_chip_depth = img_big_depth[:, :, y1:y2, x1:x2]
+                        img_chip_depth = zeropad(img_chip_depth.squeeze(0).permute(1,2,0).numpy(), length - img_chip_depth.shape[2], length - img_chip_depth.shape[3])
+                        img_chip_depth = torch.from_numpy(img_chip_depth).unsqueeze(2)
+                        img_chip_depth = img_chip_depth.permute(2,0,1).unsqueeze(0)
+                        assert img_chip_depth.shape[2] == img_chip_depth.shape[3] == length, 'image size error'
+                    
                     target_chip = target_big[:, y1:y2, x1:x2]
                     target_chip = zeropad(target_chip.squeeze(0).numpy(), length - target_chip.shape[1], length - target_chip.shape[2], target=True)
                     target_chip = torch.from_numpy(target_chip).unsqueeze(0)
+                    
                     assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
                     assert target_chip.shape[1] == target_chip.shape[2] == length, 'target size error'
 
@@ -226,7 +260,11 @@ def validate(args, val_list, model, CUDA, compute_loss):
                     bxy = [[b_num, yb/length, xb/length, i, j] for (yb, xb) in coord]
                     targets.append(torch.tensor(bxy))
 
-                    img = torch.clone(img_chip)
+                    if args.depth:
+                        img = torch.cat((img_chip ,img_chip_depth), dim=1)
+                    else:
+                        img = torch.clone(img_chip)
+
                     imgs.append(img)
 
                     b_num += 1
@@ -283,22 +321,31 @@ def main():
 
     args.best_pred = 1e6
 
-    args.log_dir += ('/'+args.model_desc)
+    args.log_dir = args.log_dir / args.model_desc
     tb_writer = SummaryWriter(args.log_dir)
 
-    args.checkpoint_path += ('/'+args.model_desc)
+    args.checkpoint_path = args.checkpoint_path / args.model_desc
     if not pathlib.Path(args.checkpoint_path).exists():
         os.mkdir(args.checkpoint_path)
-    args.checkpoint_path += 'checkpoint.pth.tar'
+    args.checkpoint_path = args.checkpoint_path / 'checkpoint.pth.tar'
 
     if args.exp == 'shanghai':
         with open(args.train_json, 'r') as outfile:        
-            train_list = json.load(outfile)
+            train_list_main = json.load(outfile)
         with open(args.val_json, 'r') as outfile:       
-            val_list = json.load(outfile)
+            val_list_main = json.load(outfile)
 
-        train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in train_list]
-        val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in val_list]
+        train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in train_list_main]
+        val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in val_list_main]
+
+        if args.depth:
+            train_list_depth = [st.replace('images', 'depth_resized_h5') for st in train_list]
+            val_list_depth = [st.replace('images', 'depth_resized_h5') for st in val_list]
+            train_list_depth = [st.replace('.jpg', '.h5') for st in train_list_depth]
+            val_list_depth = [st.replace('.jpg', '.h5') for st in val_list_depth]
+        else:
+            train_list_depth = None
+            val_list_depth = None
 
     if args.use_gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.device
@@ -343,7 +390,7 @@ def main():
             print("=> no checkpoint found at '{}'".format(args.checkpoint_path))
 
 
-    train(args, model, optimizer, train_list, val_list, tb_writer, CUDA) 
+    train(args, model, optimizer, train_list, val_list, train_list_depth, val_list_depth, tb_writer, CUDA) 
 
 
 if __name__ == '__main__':

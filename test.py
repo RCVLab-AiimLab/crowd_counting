@@ -23,18 +23,19 @@ from model import Model
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='shanghaiA, cell128/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA, cell128, depth/', help="Set model description")
 parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
-parser.add_argument('--exp_sets', default='part_A_final/train_data')
+parser.add_argument('--exp_sets', default='part_A_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
 parser.add_argument('--log_dir', default='../runs/log', type=str, help='log dir')
+parser.add_argument('--depth', default=True, type=bool, help='using depth?')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
 parser.add_argument('--cell_size', default=128, type=int, help="cell size")
-parser.add_argument('--threshold', default=0.1, type=int, help="threshold for the classification output")
+parser.add_argument('--threshold', default=0.01, type=int, help="threshold for the classification output")
 
 parser.add_argument('--best', default=False, type=bool, help='best or last saved checkpoint?') 
 parser.add_argument('--vis_patch', default=False, type=bool, help='visualize the patches') 
@@ -83,7 +84,7 @@ def test():
         imgs, targets, target_chips = [], [], []
         length = args.cell_size
         b_num = 0
-        sum_mae_prob, sum_mae_th, sum_mse, sum_mae_cell = 0.0, 0.0, 0.0, 0.0
+        sum_mae_prob, sum_mae_th, sum_mse, sum_mae_cell, sum_best = 0.0, 0.0, 0.0, 0.0, 0.0
         dataset_length = len(img_paths)
         
         pbar = enumerate(img_paths)
@@ -104,6 +105,10 @@ def test():
                 gt_file = h5py.File(img_path.replace('.jpg','_nofilter.h5').replace('images','ground_truth'),'r')
                 groundtruth = np.asarray(gt_file['density'])
 
+                if args.depth:
+                    depth_file = h5py.File(img_path.replace('.jpg','.h5').replace('images','depth_resized_h5'),'r')
+                    img_big_depth = depth_file['depth'][:] 
+
                 ni = int(math.ceil(img_big.shape[1] / length)) 
                 nj = int(math.ceil(img_big.shape[2] / length))  
                 for i in range(ni):  
@@ -116,9 +121,17 @@ def test():
                         img_chip = img_big[:, y1:y2, x1:x2]
                         img_chip = zeropad(img_chip.squeeze(0).permute(1,2,0).numpy(), length - img_chip.shape[1], length - img_chip.shape[2])
                         img_chip = torch.from_numpy(img_chip).permute(2,0,1)
+                        
+                        if args.depth:
+                            img_chip_depth = img_big_depth[y1:y2, x1:x2]
+                            img_chip_depth  = zeropad(img_chip_depth, length - img_chip_depth.shape[0], length - img_chip_depth.shape[1])
+                            img_chip_depth = torch.from_numpy(img_chip_depth).unsqueeze(0)
+                            assert img_chip_depth.shape[1] == img_chip_depth.shape[2] == length, 'image size error'
+
                         target_chip = groundtruth[y1:y2, x1:x2]
                         target_chip = zeropad(target_chip, length - target_chip.shape[0], length - target_chip.shape[1], target=True)
                         target_chip = torch.from_numpy(target_chip)
+                        
                         assert img_chip.shape[1] == img_chip.shape[2] == length, 'image size error'
                         assert target_chip.shape[0] == target_chip.shape[1] == length, 'target size error'
 
@@ -126,7 +139,11 @@ def test():
                         bxy = [[b_num, yb/length, xb/length, i, j] for (yb, xb) in coord]
                         targets.append(torch.tensor(bxy))
 
-                        img = torch.clone(img_chip)
+                        if args.depth:
+                            img = torch.cat((img_chip ,img_chip_depth), dim=0)
+                        else:
+                            img = torch.clone(img_chip)
+
                         imgs.append(img)
 
                         target_chips.append(target_chip)
@@ -152,7 +169,7 @@ def test():
                                 
                                 if args.vis_patch:
                                     im_i = imgs.size(0)//4
-                                    vis_input(imgs[im_i, ...], target_chips[im_i, ...], predicted=predictions[im_i, :, :, 0], thresholded=predictions[im_i, :, :, 0] > args.threshold)
+                                    vis_input(imgs[im_i, ...], target_chips[im_i, ...], predicted=predictions[im_i, :, :, 0], thresholded=predictions[im_i, :, :, 1])# > args.threshold)
                             
                                 targets = targets.shape[0]
                                 pred_prob = predictions[..., 0].sum()
@@ -164,6 +181,9 @@ def test():
                                 mae_thresh = abs(pred_thresh - targets)
                                 mae_cell = abs(pred_cell - targets)
 
+                                #if mae_cell > 500:
+                                #    vis_image(args, img_big, imgs, target_chips, ni, nj, predictions)
+
                                 mse = (pred_prob - targets)**2
                                 
                                 sum_mae_prob += mae_prob
@@ -171,12 +191,15 @@ def test():
                                 sum_mse += mse
                                 sum_mae_cell += mae_cell
 
+                                sum_best += mae_prob if mae_prob < mae_cell else mae_cell
+
                                 s = str((bi, 'MAE: ', mae_prob.item(), 'pred: ', pred_prob.item(), 'target: ', targets))
                                 pbar.set_description(s)
 
-                                s = '*Target {targets:.2f}\t *Pred_Prob {pred_prob:.4f}\t *Pred_Thresh {pred_thresh:.4f}\t *Pred_Cell {pred_cell:.4f}\t \
-                                    *MAE_Prob {mae_prob:.4f}\t *MAE_Thresh {mae_thresh:.4f}\t *MAE_Cell {mae_cell:.4f} \n'.\
-                                    format(targets=targets, pred_prob=pred_prob, pred_thresh=pred_thresh, pred_cell=pred_cell, \
+                                img_name = img_path.replace('.jpg','').replace('/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset/part_A_final/test_data/images/','')
+
+                                s = '{img:}\t *Target {targets:.0f}\t *Pred_Prob {pred_prob:.4f}\t *Pred_Thresh {pred_thresh:.4f}\t *Pred_Cell {pred_cell:.4f}\t *MAE_Prob {mae_prob:.4f}\t *MAE_Thresh {mae_thresh:.4f}\t *MAE_Cell {mae_cell:.4f} \n'.\
+                                    format(img=img_name, targets=targets, pred_prob=pred_prob, pred_thresh=pred_thresh, pred_cell=pred_cell, \
                                         mae_prob=(pred_prob-targets), mae_thresh=(pred_thresh-targets), mae_cell=(pred_cell-targets))
 
                                 f.writelines(s)
@@ -189,6 +212,8 @@ def test():
         print(' * MAE_Prob {mae_prob:.3f} \n  * MAE_Thresh {mae_th:.3f} \n * MSE_Prob {mse:.3f} \n * MAE_Cell {mae_cell:.3f} \n '.\
             format(mae_prob=(sum_mae_prob/dataset_length).item(), mae_th=(sum_mae_th/dataset_length).item(), mse=(sum_mse/dataset_length).sqrt().item(), \
                 mae_cell=(sum_mae_cell/dataset_length).item()))
+        
+        print(' * MAE_Best {mae_best:.3f}'.format(mae_best=(sum_best/dataset_length).item()))
 
 
 def vis_image(args, img_big, imgs, target_chips, ni, nj, predictions):
@@ -203,6 +228,8 @@ def vis_image(args, img_big, imgs, target_chips, ni, nj, predictions):
     target = torch.zeros_like(img_big[0,:,:])
     k = -1
     length = args.cell_size
+    if imgs.size(1) > 3:
+        imgs = imgs[:, :3, :, :]
     for ii in range(ni):  
         for jj in range(nj):  
             y2 = min((ii + 1) * length, img_big.shape[1])
@@ -233,7 +260,7 @@ def vis_image(args, img_big, imgs, target_chips, ni, nj, predictions):
     plt.title('Pred_thresh: ' + str(count_thresh.item()) + '  MAE: ' + str((count_thresh-count_gt).round().item()))
     plt.subplot(3,2,5).imshow(pred_cell)
     count_cell = (predictions[..., 1].view(predictions.size(0), -1).mean(1, keepdim=True)).sum()
-    plt.title('Pred_cell: ' + str(count_cell.item()) + '  MAE: ' + str((count_cell-count_gt).round().item()))
+    plt.title('Pred_cell: ' + str(count_cell.round().item()) + '  MAE: ' + str((count_cell-count_gt).round().item()))
     plt.show()
 
 

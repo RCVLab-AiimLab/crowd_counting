@@ -1,3 +1,4 @@
+ch: 4  # number of input channels
 nc: 1
 depth_multiple: 1.0  # model depth multiple
 width_multiple: 1.0  # layer channel multiple

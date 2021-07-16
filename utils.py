@@ -36,6 +36,8 @@ def vis_input(im, target, predicted=None, thresholded=None):
         im = cv2.normalize(np.float32(im), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
         im = im.astype(np.uint8)
     else:
+        if im.size(0) == 1:
+            im = im.squeeze(0)
         im = im.cpu().numpy()
 
     plt.subplot(2,i,1).imshow(im)
@@ -54,7 +56,7 @@ def vis_input(im, target, predicted=None, thresholded=None):
     if thresholded is not None:
         thresholded = thresholded.cpu().numpy()
         plt.subplot(2,i,4).imshow(thresholded, cmap=CM.jet)
-        count = thresholded.sum()
+        count = thresholded.mean()
         plt.title('Pred count (thresholded): ' + str(count.item()))
 
     plt.show()

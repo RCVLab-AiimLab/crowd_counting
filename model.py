@@ -73,8 +73,7 @@ def initialize_weights(model):
 def parse_model(d):  # model_dict, input_channels(3)
     print('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
 
-    nc, gd, gw = d['nc'], d['depth_multiple'], d['width_multiple']
-    ch = [3]
+    ch, nc, gd, gw = [d['ch']], d['nc'], d['depth_multiple'], d['width_multiple']
     no = 2  # number of outputs
     layers, save, c2 = [], [], ch[-1]
 
