@@ -20,26 +20,26 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiA, darknet, countInCell, lr=1e-5/', help="Set model description")
-parser.add_argument('--train_json', default=path/'datasets/shanghai/part_A_train.json', help='path to train json')
-parser.add_argument('--val_json', default=path/'datasets/shanghai/part_A_val.json', help='path to test json')
+parser.add_argument('--model_desc', default='QCF-QNRF, darknet, countInCell, lr=1e-5/', help="Set model description")
+parser.add_argument('--train_json', default=path/'datasets/UCF-QNRF/Train.json', help='path to train json')
+parser.add_argument('--val_json', default=path/'datasets/UCF-QNRF/Test.json', help='path to test json')
 parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default='../runs/log', type=str, help='log dir')
-parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
+parser.add_argument('--checkpoint_path', default='/drive/work_dirs/crowd_counting_UCF-QNRF', type=str, help='checkpoint path')
+parser.add_argument('--log_dir', default='/drive/work_dirs/crowd_counting_UCF-QNRF/log', type=str, help='log dir')
+parser.add_argument('--exp', default='QNRF', type=str, help='set dataset for training experiment')
 
 # MODEL
 parser.add_argument('--model_file', default='model.yaml')
-parser.add_argument('--cell_size', default=64, type=int, help="cell size")
+parser.add_argument('--cell_size', default=128, type=int, help="cell size")
 parser.add_argument('--threshold', default=0.9, type=int, help="threshold for the classification output")
 
 
 # TRAINING
-parser.add_argument('--batch_size', default=512, type=int)
+parser.add_argument('--batch_size', default=256, type=int)
 parser.add_argument('--epochs', default=1000, type=int, help="Number of epochs to train for")
-parser.add_argument('--workers', default=4, type=int, help="Number of workers in loading dataset")
+parser.add_argument('--workers', default=1, type=int, help="Number of workers in loading dataset")
 parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
 parser.add_argument('--lr0', default=0.00001, type=float, help="initial learning rate")
@@ -59,7 +59,8 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
                        train=True, 
                        seen=0,
                        batch_size=1,
-                       num_workers=args.workers))
+                       num_workers=args.workers,
+                       exp=args.exp))
 
         losses = AverageMeter()
         losses_obj = AverageMeter()
@@ -69,7 +70,7 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
         end = time.time()
 
         model.train()
-
+        
         pbar = enumerate(train_loader)
         pbar = tqdm(pbar, total=len(train_loader))  # progress bar
 
@@ -115,14 +116,20 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
                     if b_num >= args.batch_size:
                         imgs = torch.stack(imgs, dim=0).squeeze(1)
                         targets = [ti for ti in targets if len(ti) != 0]
+                        s = sum([t.sum() for t in targets])
+                        if (s <= 0):
+                            imgs = []
+                            targets = []
+                            b_num = 0
+                            continue
                         targets = torch.cat(targets)
 
                         if CUDA:
                             imgs = imgs.cuda()
                             targets = targets.cuda()
                         
-                        if epoch <= 1:
-                            tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
+#                        if epoch <= 1:
+#                            tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
 
                         pred = model(imgs, training=True)  # forward
                         loss, lobj, lnum = compute_loss(pred, targets) 
@@ -150,6 +157,13 @@ def train(args, model, optimizer, train_list, val_list, tb_writer, CUDA):
                         b_num = 0
 
             # end batch ------------
+        if (epoch == args.start_epoch):
+            save_checkpoint({
+                'epoch': epoch,
+                'arch': args.checkpoint_path,
+                'state_dict': model.state_dict(),
+                'best_pred': args.best_pred,
+                'optimizer' : optimizer.state_dict(),}, True, args.checkpoint_path)
 
         pred, predByNum, val_losses = validate(args, val_list, model, CUDA, compute_loss)
 
@@ -178,7 +192,7 @@ def validate(args, val_list, model, CUDA, compute_loss):
     print ('begin validation')
     val_loader = torch.utils.data.DataLoader(listDataset(val_list, 
                     shuffle=False, transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
-                    train=False), 
+                    train=False, exp=args.exp), 
                     batch_size=1)    
     
     model.eval()
@@ -282,8 +296,18 @@ def main():
         with open(args.val_json, 'r') as outfile:       
             val_list = json.load(outfile)
 
-        train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in train_list]
-        val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in val_list]
+        train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/drive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in train_list]
+        val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/drive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in val_list]
+    elif args.exp == 'NWPU':
+        with open(args.train_json, 'r') as outfile:
+            train_list = json.load(outfile)
+        with open(args.val_json, 'r') as outfile:
+            val_list = json.load(outfile)
+    elif args.exp == 'QNRF':
+        with open(args.train_json, 'r') as outfile:
+            train_list = json.load(outfile)
+        with open(args.val_json, 'r') as outfile:
+            val_list = json.load(outfile)
 
     if args.use_gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.device
