@@ -11,7 +11,7 @@ from matplotlib import cm as CM
 def save_checkpoint(state, is_best, filename='../checkpoint.pth.tar'):
     torch.save(state, filename)
     if is_best:
-        best_model_path = filename.replace('checkpoint.pth.tar', 'model_best.pth.tar')
+        best_model_path = filename.parent / 'model_best.pth.tar'
         shutil.copyfile(filename, best_model_path) 
 
 
@@ -24,6 +24,12 @@ def zeropad(img, h, w, target=False):
     return padded
 
 def vis_input(im, target, predicted=None, thresholded=None):
+    if im.size(0) == 4:
+        depth = im[3, :, :].cpu().numpy()
+        im = im[:3, :, :]
+        plt.subplot(1,1,1).imshow(depth, cmap=CM.jet)
+        plt.title('depth')
+        plt.show()
     if (predicted is not None) and (thresholded is not None):
         i = 2
     elif (predicted is not None) or (thresholded is not None):
@@ -56,7 +62,7 @@ def vis_input(im, target, predicted=None, thresholded=None):
     if thresholded is not None:
         thresholded = thresholded.cpu().numpy()
         plt.subplot(2,i,4).imshow(thresholded, cmap=CM.jet)
-        count = thresholded.mean()
+        count = thresholded.sum()
         plt.title('Pred count (thresholded): ' + str(count.item()))
 
     plt.show()

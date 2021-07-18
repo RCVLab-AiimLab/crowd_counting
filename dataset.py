@@ -9,13 +9,13 @@ import torchvision.transforms.functional as F
 
 class listDataset(Dataset):
     def __init__(self, root, depthroot, shape=None, depth=False, shuffle=True, transform1=None, transform2=None, train=False, seen=0, batch_size=1, num_workers=4):
-        if shuffle==True:
-            if depth:
-                main_root = list(zip(root, depthroot))
-                random.shuffle(main_root)
-                root, depthroot = zip(*main_root)
-                depthroot = depthroot *4
-                self.depthlines = depthroot
+        #if shuffle==True:
+        if depth:
+            main_root = list(zip(root, depthroot))
+            random.shuffle(main_root)
+            root, depthroot = zip(*main_root)
+            depthroot = depthroot *4
+            self.depthlines = depthroot
         if train:
             root = root * 4
         

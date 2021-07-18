@@ -37,10 +37,10 @@ head:
    [[-1, 6], 1, Concat, [1]],  # cat backbone P4
    [-1, 1, Conv, [256, 3, 1]],  # 19 (P4/8-medium)
 
-   [-2, 1, Conv, [128, 1, 1]],
-   [-1, 1, nn.Upsample, [None, 2, 'nearest']],
-   [[-1, 4], 1, Concat, [1]],  # cat backbone P4
-   [-1, 1, Conv, [256, 3, 1]],  # 19 (P4/4-medium)
+   #[-2, 1, Conv, [128, 1, 1]],
+   #[-1, 1, nn.Upsample, [None, 2, 'nearest']],
+   #[[-1, 4], 1, Concat, [1]],  # cat backbone P4
+   #[-1, 1, Conv, [256, 3, 1]],  # 19 (P4/4-medium)
 
-   [[27], 1, Detect, [nc, 1]],  
+   [[23], 1, Detect, [nc, 1]],  
   ]

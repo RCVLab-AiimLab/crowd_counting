@@ -21,21 +21,21 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiA, cell128, depth/', help="Set model description")
-parser.add_argument('--train_json', default=path/'datasets/shanghai/part_A_train_with_val.json', help='path to train json')
-parser.add_argument('--val_json', default=path/'datasets/shanghai/part_A_test.json', help='path to test json')
+parser.add_argument('--model_desc', default='shanghaiB, cell256/', help="Set model description")
+parser.add_argument('--train_json', default=path/'datasets/shanghai/part_B_train.json', help='path to train json')
+parser.add_argument('--val_json', default=path/'datasets/shanghai/part_B_test.json', help='path to test json')
 parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default=path.parent/'runs/weights', type=str, help='checkpoint path')
 parser.add_argument('--log_dir', default=path.parent/'runs/log', type=str, help='log dir')
 parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
-parser.add_argument('--depth', default=True, type=bool, help='using depth?')
+parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
-parser.add_argument('--cell_size', default=128, type=int, help="cell size")
-parser.add_argument('--threshold', default=0.1, type=int, help="threshold for the classification output")
+parser.add_argument('--cell_size', default=256, type=int, help="cell size")
+parser.add_argument('--threshold', default=0.01, type=int, help="threshold for the classification output")
 
 # TRAINING
 parser.add_argument('--batch_size', default=512, type=int)
@@ -52,7 +52,7 @@ parser.add_argument('--adam', default=False, type=bool, help='use torch.optim.Ad
 def train(args, model, optimizer, train_list, val_list, train_list_depth, val_list_depth, tb_writer, CUDA):
 
     compute_loss = ComputeLoss(model)
-    
+
     for epoch in range(args.start_epoch, args.epochs):
         train_loader = torch.utils.data.DataLoader(listDataset(train_list,
                        train_list_depth,
@@ -150,8 +150,8 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
                         #if epoch <= 1:
                         #    tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
 
-                        pred = model(imgs, training=True)  # forward
-                        loss, lobj, lcell, lneighbor = compute_loss(pred, targets) 
+                        pred0, pred1 = model(imgs, training=True)  # forward
+                        loss, lobj, lcell, lneighbor = compute_loss(pred0, pred1, targets) 
 
                         losses.update(loss.item(), imgs.size(0))
                         losses_obj.update(lobj.item(), imgs.size(0))
@@ -226,7 +226,7 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
     imgs, targets = [], []
     b_num = 0
 
-    with open(args.log_dir + 'results.txt', 'w') as f:
+    with open(args.log_dir / 'results.txt', 'w') as f:
         for bi, (img_big, target_big, img_big_depth) in pbar:  
             ni = int(math.ceil(img_big.shape[2] / length))  
             nj = int(math.ceil(img_big.shape[3] / length)) 
@@ -279,23 +279,21 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
                             targets = targets.cuda()
 
                         with torch.no_grad():
-                            predictions = model(imgs, training=False)
-                            loss, _, _, _ = compute_loss(predictions, targets)  # loss scaled by batch_size
+                            predictions0, predictions1 = model(imgs, training=False)
+                            loss, _, _, _ = compute_loss(predictions0, predictions1, targets)  # loss scaled by batch_size
 
                             losses.update(loss.item(), imgs.size(0))
                             
                             targets = targets.shape[0]
-                            pred_prob = predictions[..., 0].sum()
-                            pred_thresh = (predictions[..., 0] > args.threshold).sum()
-                            pred_cell = (predictions[..., 1]).view(predictions.size(0), -1).mean(1, keepdim=True)
-                            pred_cell = pred_cell.sum()
+                            pred_prob = predictions0.sum()
+                            pred_thresh = (predictions0 > args.threshold).sum()
+                            pred_cell = predictions1.sum()
 
                             mae_prob += abs(pred_prob - targets)
                             mae_thresh += abs(pred_thresh - targets)
                             mae_cell += abs(pred_cell - targets)
 
-                            s = '*Target {targets:.2f}\t *Pred_Prob {pred_prob:.4f}\t *Pred_Thresh {pred_thresh:.4f}\t *Pred_Cell {pred_cell:.4f}\t \
-                                *MAE_Prob {mae_prob:.4f}\t *MAE_Thresh {mae_thresh:.4f}\t *MAE_Cell {mae_cell:.4f} \n'.\
+                            s = '*Target {targets:.0f}\t *Pred_Prob {pred_prob:.4f}\t *Pred_Thresh {pred_thresh:.4f}\t *Pred_Cell {pred_cell:.4f}\t *MAE_Prob {mae_prob:.4f}\t *MAE_Thresh {mae_thresh:.4f}\t *MAE_Cell {mae_cell:.4f} \n'.\
                                 format(targets=targets, pred_prob=pred_prob, pred_thresh=pred_thresh, pred_cell=pred_cell, \
                                     mae_prob=(pred_prob-targets), mae_thresh=(pred_thresh-targets), mae_cell=(pred_cell-targets))
                             

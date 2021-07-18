@@ -23,19 +23,19 @@ from model import Model
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='shanghaiA, cell128, depth/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA, cell128/', help="Set model description")
 parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
 parser.add_argument('--exp_sets', default='part_A_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
 parser.add_argument('--log_dir', default='../runs/log', type=str, help='log dir')
-parser.add_argument('--depth', default=True, type=bool, help='using depth?')
+parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
 parser.add_argument('--cell_size', default=128, type=int, help="cell size")
-parser.add_argument('--threshold', default=0.01, type=int, help="threshold for the classification output")
+parser.add_argument('--threshold', default=[0.1], help="[0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.2, 0.3, 0.4, 0.5], threshold for the classification output")
 
 parser.add_argument('--best', default=False, type=bool, help='best or last saved checkpoint?') 
 parser.add_argument('--vis_patch', default=False, type=bool, help='visualize the patches') 
@@ -77,10 +77,8 @@ def test():
 
     model.load_state_dict(checkpoint['state_dict'])
 
-    #for thresh in [0.01, 0.03, 0.05, 0.07, 0.09, 0.1, 0.3, 0.5, 0.7, 0.9]:
-    for thresh in [0.1]:
+    for thresh in args.threshold:
         print('thresh: ', thresh)
-        args.threshold = thresh
         imgs, targets, target_chips = [], [], []
         length = args.cell_size
         b_num = 0
@@ -162,27 +160,24 @@ def test():
                                 targets = targets.cuda()
 
                             with torch.no_grad():
-                                predictions = model(imgs, training=False)
+                                predictions0, predictions1 = model(imgs, training=False)
 
                                 if args.vis_image:
-                                    vis_image(args, img_big, imgs, target_chips, ni, nj, predictions)
+                                    vis_image(args, img_big, imgs, target_chips, ni, nj, predictions0, predictions1, thresh)
                                 
                                 if args.vis_patch:
                                     im_i = imgs.size(0)//4
-                                    vis_input(imgs[im_i, ...], target_chips[im_i, ...], predicted=predictions[im_i, :, :, 0], thresholded=predictions[im_i, :, :, 1])# > args.threshold)
+                                    vis_input(imgs[im_i, ...], target_chips[im_i, ...], predicted=predictions0[im_i, :, :], thresholded=predictions0[im_i, :, :] > thresh)
                             
                                 targets = targets.shape[0]
-                                pred_prob = predictions[..., 0].sum()
-                                pred_thresh = (predictions[..., 0] > args.threshold).sum()
-                                pred_cell = (predictions[..., 1]).view(predictions.size(0), -1).mean(1, keepdim=True)
-                                pred_cell = pred_cell.sum()
+                                pred_prob = (predictions0.view(predictions0.size(0), -1)).sum(1, keepdim=True)
+                                pred_prob = pred_prob.sum()
+                                pred_thresh = (predictions0 > thresh).sum()
+                                pred_cell = predictions1.sum()
 
                                 mae_prob = abs(pred_prob - targets)
                                 mae_thresh = abs(pred_thresh - targets)
                                 mae_cell = abs(pred_cell - targets)
-
-                                #if mae_cell > 500:
-                                #    vis_image(args, img_big, imgs, target_chips, ni, nj, predictions)
 
                                 mse = (pred_prob - targets)**2
                                 
@@ -196,7 +191,7 @@ def test():
                                 s = str((bi, 'MAE: ', mae_prob.item(), 'pred: ', pred_prob.item(), 'target: ', targets))
                                 pbar.set_description(s)
 
-                                img_name = img_path.replace('.jpg','').replace('/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset/part_A_final/test_data/images/','')
+                                img_name = img_path.replace('.jpg','').replace('/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset/' + args.exp_sets + '/images/','')
 
                                 s = '{img:}\t *Target {targets:.0f}\t *Pred_Prob {pred_prob:.4f}\t *Pred_Thresh {pred_thresh:.4f}\t *Pred_Cell {pred_cell:.4f}\t *MAE_Prob {mae_prob:.4f}\t *MAE_Thresh {mae_thresh:.4f}\t *MAE_Cell {mae_cell:.4f} \n'.\
                                     format(img=img_name, targets=targets, pred_prob=pred_prob, pred_thresh=pred_thresh, pred_cell=pred_cell, \
@@ -211,17 +206,18 @@ def test():
 
         print(' * MAE_Prob {mae_prob:.3f} \n  * MAE_Thresh {mae_th:.3f} \n * MSE_Prob {mse:.3f} \n * MAE_Cell {mae_cell:.3f} \n '.\
             format(mae_prob=(sum_mae_prob/dataset_length).item(), mae_th=(sum_mae_th/dataset_length).item(), mse=(sum_mse/dataset_length).sqrt().item(), \
-                mae_cell=(sum_mae_cell/dataset_length).item()))
+                mae_cell=(sum_mae_cell/dataset_length)))
         
         print(' * MAE_Best {mae_best:.3f}'.format(mae_best=(sum_best/dataset_length).item()))
 
 
-def vis_image(args, img_big, imgs, target_chips, ni, nj, predictions):
+def vis_image(args, img_big, imgs, target_chips, ni, nj, predictions0, predictions1, thresh):
     import torch.nn as nn 
     import matplotlib.pyplot as plt
     import cv2 
 
-    upsample = nn.Upsample(scale_factor=4, mode='nearest')
+    upsample = nn.Upsample(scale_factor=8, mode='nearest')
+    upsample1 = nn.Upsample(scale_factor=128, mode='nearest')
     img = torch.zeros_like(img_big)
     pred_prob = torch.zeros_like(img_big[0,:,:])
     pred_cell = torch.zeros_like(img_big[0,:,:])
@@ -240,8 +236,8 @@ def vis_image(args, img_big, imgs, target_chips, ni, nj, predictions):
             k += 1
             img[:, y1:y2, x1:x2] = imgs[k, ...]
             target[y1:y2, x1:x2] = target_chips[k, ...]
-            pred_prob[y1:y2, x1:x2] = upsample(predictions[k, :, :, 0].unsqueeze(0).unsqueeze(0))
-            pred_cell[y1:y2, x1:x2] = upsample(predictions[k, :, :, 1].unsqueeze(0).unsqueeze(0))
+            pred_prob[y1:y2, x1:x2] = upsample(predictions0[k, :, :].unsqueeze(0).unsqueeze(0))
+            pred_cell[y1:y2, x1:x2] = upsample1(predictions1[k, :].unsqueeze(0).unsqueeze(0))
 
     img = img.permute(1, 2, 0).cpu()
     img = cv2.normalize(np.float32(img), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
@@ -250,16 +246,16 @@ def vis_image(args, img_big, imgs, target_chips, ni, nj, predictions):
     plt.subplot(3,2,2).imshow(target)
     count_gt = target.sum()
     plt.title('People count: ' + str(count_gt.item()))
-    pred_prob = pred_prob / 16
+    pred_prob = pred_prob / 64
     plt.subplot(3,2,3).imshow(pred_prob)
     count_prob = pred_prob.sum()
     plt.title('Pred_prob: ' + str(count_prob.round().item()) + '  MAE: ' + str((count_prob-count_gt).round().item()))
-    pred_thresh = pred_prob > args.threshold
-    count_thresh = pred_thresh.sum()
+    pred_thresh = pred_prob > thresh
+    count_thresh = pred_thresh.sum() / 64
     plt.subplot(3,2,4).imshow(pred_thresh)
     plt.title('Pred_thresh: ' + str(count_thresh.item()) + '  MAE: ' + str((count_thresh-count_gt).round().item()))
     plt.subplot(3,2,5).imshow(pred_cell)
-    count_cell = (predictions[..., 1].view(predictions.size(0), -1).mean(1, keepdim=True)).sum()
+    count_cell = predictions1.sum()      
     plt.title('Pred_cell: ' + str(count_cell.round().item()) + '  MAE: ' + str((count_cell-count_gt).round().item()))
     plt.show()
 

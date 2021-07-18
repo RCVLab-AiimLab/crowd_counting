@@ -97,13 +97,17 @@ def parse_model(d):  # model_dict, input_channels(3)
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
         elif m is Concat:
-            c2 = sum([ch[-1 if x == -1 else x + 1] for x in f])
             c2 = sum([ch[x] for x in f])
         elif m is Detect:
             args.append([ch[x] for x in f])
             if isinstance(args[1], int): 
                 args[1] = [list(range(args[1] * 2))] * len(f)
             #args = [args[2]]
+        
+        elif m is Contract:
+            c2 = ch[f] * args[0] ** 2
+        elif m is Expand:
+            c2 = ch[f] // args[0] ** 2
 
         else:
             c2 = ch[f]
@@ -126,18 +130,30 @@ class Detect(nn.Module):
     def __init__(self, nc, ext, ch=()):
         super(Detect, self).__init__() 
         self.no = 2  # number of outputs
-        self.m = nn.ModuleList(nn.Conv2d(x, self.no, 1) for x in ch)  # output conv
+        self.m = nn.ModuleList(nn.Conv2d(x, self.no, 1, dilation=1) for x in ch)  # output conv
+        self.regress = nn.Sequential(nn.Linear(ch[0], ch[0]//2), 
+                                    nn.LeakyReLU(),
+                                    nn.Linear(ch[0]//2, 1))
+        
+        self.ch = ch
+        #self.dropout1 = nn.Dropout2d(0.25)
 
     def forward(self, x, inference):
 
         x = self.m[0](x[0])  # conv
         bs, _, ny, nx = x.shape  
         x = x.view(bs, self.no, ny, nx).permute(0, 2, 3, 1).contiguous()
-    
-        if inference:  
-            x[..., 0] = x[..., 0].sigmoid()
+        
+        x0 = x[..., 0]
+        x1 = x[..., 1]
+        x1 = x1.view(-1, self.ch[0])
+        x1 = self.regress(x1)
 
-        return x
+        if inference:  
+            #x[..., 0] = x[..., 0].sigmoid()
+            x0 = x0.sigmoid()
+
+        return x0, x1
 
 
 class Conv(nn.Module):
@@ -190,24 +206,25 @@ class ComputeLoss:
         self.MSELoss = nn.MSELoss()
         
 
-    def __call__(self, p, targets): 
+    def __call__(self, p0, p1, targets): 
         device = targets.device
         lobj = torch.zeros(1, device=device)
         lcell = torch.zeros(1, device=device)
         lcountInCell = torch.zeros(1, device=device)
         lcountInNbr = torch.zeros(1, device=device)
-        indices, neighbors = self.build_targets(p, targets) 
+        indices, neighbors = self.build_targets(p0, targets) 
 
         # Losses
         b, gj, gi = indices[0]  
-        tobj = torch.zeros_like(p[..., 0], device=device)  
-        tcell = torch.zeros_like(p[..., 0], device=device)   
+        tobj = torch.zeros_like(p0, device=device)  
+        tcell = torch.zeros_like(p1, device=device)   
 
         n = b.shape[0]  
         if n:
             tobj[b, gi, gj] = 1 
 
             nonempty, count = torch.unique(b, return_counts=True) 
+            '''
             nbrs_coord = []
             for bi in nonempty:
                 ind = torch.where(b==bi)[0]
@@ -220,37 +237,50 @@ class ComputeLoss:
                     for j in range(1,9):
                         if nbrs_coord[i, 0] == coords[j, 0] and nbrs_coord[i, 1] == coords[j, 1]:
                             nbrs_cell[bi, j-1] = nonempty[i]
-
+            
+            
+            '''
             for k, bi in enumerate(nonempty):
-                tcell[bi, :, :] = float(count[k])
+                #indx = torch.where(b==bi)
+                #tcell[bi, gi[indx], gj[indx]] = float(count[k])
+                tcell[bi, 0] = float(count[k])
+            '''
+                #tcell[bi, :, :] = float(count[k])
+                #countInCell = p[bi, gi[indx], gj[indx], 1].mean()
+                #countInCell_gt = tcell[bi, gi[indx], gj[indx]].mean()
+                #lcountInCell += torch.abs(countInCell - countInCell_gt).mean()  
+                
                 nbr = nbrs_cell[k, nbrs_cell[k,:] >= 0]
                 CountInNbr_gt = torch.clone(count[k])
-                countInNbr = torch.clone(p[bi, :, :, 1].mean())
+                print(p[bi, gi[indx], gj[indx], 1])
+                countInNbr = torch.clone(p[bi, gi[indx], gj[indx], 1].mean())
                 for i in nbr:
                     ind = torch.where(nonempty==i)[0][0]
                     CountInNbr_gt += torch.clone(count[ind])
-                    countInNbr += torch.clone(p[ind, :, :, 1].mean())
+                    countInNbr += torch.clone(p[ind, gi[indx], gj[indx], 1].mean())
 
                 lcountInNbr += torch.abs(countInNbr - CountInNbr_gt).mean()
+            '''
 
-        lobj += self.BCEobj(p[..., 0], tobj)
-        lcell += self.MSELoss(p[..., 1], tcell)
-        countInCell = p[..., 0].view(p.size(0), -1).sum(1, keepdim=True)
-        countInCell_gt = tcell.view(p.size(0), -1).mean(1, keepdim=True)
+        lobj += self.BCEobj(p0, tobj)
+        lcell += torch.abs(p1 - tcell).mean()
+        #lcell += self.MSELoss(p1, tcell)
+        #countInCell = p[..., 1].view(p.size(0), -1).mean(1, keepdim=True).sum()
+        #countInCell_gt = tcell.view(p.size(0), -1).mean(1, keepdim=True).sum()
         #lcountInCell += torch.abs(countInCell - countInCell_gt).mean()  
 
         bs = tobj.shape[0]  # batch size
 
-        return (lobj * bs) + lcell + lcountInCell + lcountInNbr, lobj.detach(), lcell.detach(), lcountInNbr.detach()
+        return (lobj * bs) + (lcell) + lcountInNbr, lobj.detach(), lcell.detach(), lcountInNbr.detach()
 
 
-    def build_targets(self, p, targets):
+    def build_targets(self, p0, targets):
         # Build targets for compute_loss()
         indices = []
 
         gain = torch.ones(5, device=targets.device)  # normalized to gridspace gain
         
-        gain[1:3] = torch.tensor(p.shape)[[2, 1]]  # xyxy gain
+        gain[1:3] = torch.tensor(p0.shape)[[2, 1]]  # xyxy gain
         t = targets * gain
 
         b = t[:, 0].long().T  # image, class
@@ -267,12 +297,13 @@ class ComputeLoss:
         cells = starmap(lambda a,b: (bi+a, bj+b), product((0,-1,+1), (0,-1,+1)))
         nbr = list(cells)
         neighbors = []
+        '''
         for i in nbr: 
             for j in i: 
                 neighbors.append(j)
 
         neighbors = torch.stack(neighbors).T
+        '''
 
         return indices, neighbors
-
 
