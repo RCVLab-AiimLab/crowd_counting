@@ -9,7 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision import datasets, transforms
 from torch.autograd import Variable
 import pathlib
-from model import Model, ComputeLoss
+from model import Model, ComputeLoss, CSRNet
 from dataset import listDataset
 from tqdm import tqdm
 import math
@@ -21,7 +21,7 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiB, cell256/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiB, cell256, csrnet/', help="Set model description")
 parser.add_argument('--train_json', default=path/'datasets/shanghai/part_B_train.json', help='path to train json')
 parser.add_argument('--val_json', default=path/'datasets/shanghai/part_B_test.json', help='path to test json')
 parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
@@ -150,13 +150,11 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
                         #if epoch <= 1:
                         #    tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
 
-                        pred0, pred1 = model(imgs, training=True)  # forward
-                        loss, lobj, lcell, lneighbor = compute_loss(pred0, pred1, targets) 
+                        pred0 = model(imgs, training=True)  # forward
+                        loss, lcell = compute_loss(pred0, targets) 
 
                         losses.update(loss.item(), imgs.size(0))
-                        losses_obj.update(lobj.item(), imgs.size(0))
                         losses_cell.update(lcell.item(), imgs.size(0))
-                        losses_neighbor.update(lneighbor.item(), imgs.size(0))
 
                         optimizer.zero_grad()
                         loss.backward()
@@ -178,7 +176,7 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
 
             # end batch ------------
 
-        pred_prob, pred_thresh, pred_cell, val_losses = validate(args, val_list, val_list_depth, model, CUDA, compute_loss)
+        pred_prob, _, _, val_losses = validate(args, val_list, val_list_depth, model, CUDA, compute_loss)
 
         is_best = pred_prob < args.best_pred
         args.best_pred = min(pred_prob, args.best_pred)
@@ -192,13 +190,13 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
             'optimizer' : optimizer.state_dict(),}, is_best, args.checkpoint_path)
         
         tb_writer.add_scalar('train loss/total', losses.avg, epoch)
-        tb_writer.add_scalar('train loss/obj', losses_obj.avg, epoch)
-        tb_writer.add_scalar('train loss/cell', losses_cell.avg, epoch)
-        tb_writer.add_scalar('train loss/neighbor', losses_neighbor.avg, epoch)
+        #tb_writer.add_scalar('train loss/obj', losses_obj.avg, epoch)
+        #tb_writer.add_scalar('train loss/cell', losses_cell.avg, epoch)
+        #tb_writer.add_scalar('train loss/neighbor', losses_neighbor.avg, epoch)
         tb_writer.add_scalar('val loss/total', val_losses.avg, epoch)
         tb_writer.add_scalar('MAE/by prob', pred_prob, epoch)
-        tb_writer.add_scalar('MAE/by threshold', pred_thresh, epoch)
-        tb_writer.add_scalar('MAE/cell', pred_cell, epoch)
+        #tb_writer.add_scalar('MAE/by threshold', pred_thresh, epoch)
+        #tb_writer.add_scalar('MAE/cell', pred_cell, epoch)
 
         # end epoch ------------
 
@@ -279,23 +277,23 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
                             targets = targets.cuda()
 
                         with torch.no_grad():
-                            predictions0, predictions1 = model(imgs, training=False)
-                            loss, _, _, _ = compute_loss(predictions0, predictions1, targets)  # loss scaled by batch_size
+                            predictions0 = model(imgs, training=False)
+                            loss, _ = compute_loss(predictions0, targets)  # loss scaled by batch_size
 
                             losses.update(loss.item(), imgs.size(0))
                             
                             targets = targets.shape[0]
-                            pred_prob = predictions0.sum()
+                            pred_prob = predictions0.view(predictions0.size(0), -1).mean(1, keepdim=True).sum()
                             pred_thresh = (predictions0 > args.threshold).sum()
-                            pred_cell = predictions1.sum()
+                            pred_cell = predictions0.sum()
 
                             mae_prob += abs(pred_prob - targets)
                             mae_thresh += abs(pred_thresh - targets)
                             mae_cell += abs(pred_cell - targets)
 
                             s = '*Target {targets:.0f}\t *Pred_Prob {pred_prob:.4f}\t *Pred_Thresh {pred_thresh:.4f}\t *Pred_Cell {pred_cell:.4f}\t *MAE_Prob {mae_prob:.4f}\t *MAE_Thresh {mae_thresh:.4f}\t *MAE_Cell {mae_cell:.4f} \n'.\
-                                format(targets=targets, pred_prob=pred_prob, pred_thresh=pred_thresh, pred_cell=pred_cell, \
-                                    mae_prob=(pred_prob-targets), mae_thresh=(pred_thresh-targets), mae_cell=(pred_cell-targets))
+                                format(targets=targets, pred_prob=pred_prob, pred_thresh=0, pred_cell=0, \
+                                    mae_prob=(pred_prob-targets), mae_thresh=(0), mae_cell=(0))
                             
                             f.writelines(s)
 
@@ -308,8 +306,8 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
     mae_cell = mae_cell/len(val_loader)
 
     print(' * MAE_Prob {mae_prob:.3f} '.format(mae_prob=mae_prob))
-    print(' * MAE_Thresh {mae_thresh:.3f} ({thresh:.3f}) '.format(mae_thresh=mae_thresh, thresh=args.threshold))
-    print(' * MAE_Cell {mae_cell:.3f} '.format(mae_cell=mae_cell))
+    #print(' * MAE_Thresh {mae_thresh:.3f} ({thresh:.3f}) '.format(mae_thresh=mae_thresh, thresh=args.threshold))
+    #print(' * MAE_Cell {mae_cell:.3f} '.format(mae_cell=mae_cell))
 
     return mae_prob, mae_thresh, mae_cell, losses       
 
@@ -352,29 +350,16 @@ def main():
     else:
         CUDA = False
 
-    model = Model(args.model_file)
+    #model = Model(args.model_file, args.cell_size)
+
+    model = CSRNet()
 
     if CUDA:
         model = model.cuda()
 
-    pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
-    for k, v in model.named_modules():
-        if hasattr(v, 'bias') and isinstance(v.bias, nn.Parameter):
-            pg2.append(v.bias)  # biases
-        if isinstance(v, nn.BatchNorm2d):
-            pg0.append(v.weight)  # no decay
-        elif hasattr(v, 'weight') and isinstance(v.weight, nn.Parameter):
-            pg1.append(v.weight)  # apply decay
-
-    if args.adam:
-        optimizer = torch.optim.Adam(pg0, lr=args.lr0, betas=(args.momentum, 0.999))  # adjust beta1 to momentum
-    else:
-        optimizer = torch.optim.SGD(pg0, lr=args.lr0, momentum=args.momentum, nesterov=True)
-
-    optimizer.add_param_group({'params': pg1, 'weight_decay': args.weight_decay})  # add pg1 with weight_decay
-    optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
-    del pg0, pg1, pg2
-
+    #optimizer = torch.optim.SGD(model.parameters(), args.lr0, momentum=args.momentum, weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr0, betas=(args.momentum, 0.999))  # adjust beta1 to momentum
+    
     if args.use_pre:
         if os.path.isfile(args.checkpoint_path):
             print("=> loading checkpoint '{}'".format(args.checkpoint_path))

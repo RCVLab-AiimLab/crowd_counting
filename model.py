@@ -7,18 +7,73 @@ import torch
 import torch.nn as nn 
 import cv2 
 from itertools import product, starmap
+from torchvision import models
 
 
-        
+
+class CSRNet(nn.Module):
+    def __init__(self, load_weights=False):
+        super(CSRNet, self).__init__()
+        self.seen = 0
+        self.frontend_feat = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512]
+        self.backend_feat  = [512, 512, 512,256,128,64]
+        self.frontend = make_layers(self.frontend_feat)
+        self.backend = make_layers(self.backend_feat,in_channels = 512,dilation = True)
+        self.output_layer = nn.Conv2d(64, 1, kernel_size=1)
+        if not load_weights:
+            mod = models.vgg16(pretrained = True)
+            self._initialize_weights()
+            for i in range(len(self.frontend.state_dict().items())):
+                list(self.frontend.state_dict().items())[i][1].data[:] = list(mod.state_dict().items())[i][1].data[:]
+
+
+    def forward(self, x, training=True):
+        x = self.frontend(x)
+        x = self.backend(x)
+        x = self.output_layer(x)
+        x = x.squeeze(1)
+        return x
+
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.normal_(m.weight, std=0.01)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            
+                
+def make_layers(cfg, in_channels = 3,batch_norm=False,dilation = False):
+    if dilation:
+        d_rate = 2
+    else:
+        d_rate = 1
+    layers = []
+    for v in cfg:
+        if v == 'M':
+            layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
+        else:
+            conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=d_rate,dilation = d_rate)
+            if batch_norm:
+                layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
+            else:
+                layers += [conv2d, nn.ReLU(inplace=True)]
+            in_channels = v
+    return nn.Sequential(*layers)  
+
+
 class Model(nn.Module):
-    def __init__(self, model_file): 
+    def __init__(self, model_file, in_size): 
         super(Model, self).__init__()
 
         with open(model_file) as f:
             self.model_dict = yaml.load(f, Loader=yaml.FullLoader)  # model dict
 
         # Define model
-        self.model, self.save = parse_model(deepcopy(self.model_dict))  
+        self.model, self.save = parse_model(deepcopy(self.model_dict), in_size)  
 
         initialize_weights(self)
         self.info()
@@ -70,130 +125,6 @@ def initialize_weights(model):
             m.inplace = True
 
 
-def parse_model(d):  # model_dict, input_channels(3)
-    print('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
-
-    ch, nc, gd, gw = [d['ch']], d['nc'], d['depth_multiple'], d['width_multiple']
-    no = 2  # number of outputs
-    layers, save, c2 = [], [], ch[-1]
-
-    for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
-        m = eval(m) if isinstance(m, str) else m  # eval strings
-        for j, a in enumerate(args):
-            try:
-                args[j] = eval(a) if isinstance(a, str) else a  # eval strings
-            except:
-                pass
-
-        n = max(round(n * gd), 1) if n > 1 else n  # depth gain
-        if m in [Conv]:
-            c1, c2 = ch[f], args[0]
-
-            if c2 != no:  # if not output
-                c2 = make_divisible(c2 * gw, 8)
-
-            args = [c1, c2, *args[1:]]
-
-        elif m is nn.BatchNorm2d:
-            args = [ch[f]]
-        elif m is Concat:
-            c2 = sum([ch[x] for x in f])
-        elif m is Detect:
-            args.append([ch[x] for x in f])
-            if isinstance(args[1], int): 
-                args[1] = [list(range(args[1] * 2))] * len(f)
-            #args = [args[2]]
-        
-        elif m is Contract:
-            c2 = ch[f] * args[0] ** 2
-        elif m is Expand:
-            c2 = ch[f] // args[0] ** 2
-
-        else:
-            c2 = ch[f]
-
-        m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
-        t = str(m)[8:-2].replace('__main__.', '')  # module type
-        np = sum([x.numel() for x in m_.parameters()])  # number params
-        m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
-        print('%3s%18s%3s%10.0f  %-40s%-30s' % (i, f, n, np, t, args))  
-        save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
-        layers.append(m_)
-        if i == 0:
-            ch = []
-        ch.append(c2)
-    return nn.Sequential(*layers), sorted(save)            
-
-
-
-class Detect(nn.Module):
-    def __init__(self, nc, ext, ch=()):
-        super(Detect, self).__init__() 
-        self.no = 2  # number of outputs
-        self.m = nn.ModuleList(nn.Conv2d(x, self.no, 1, dilation=1) for x in ch)  # output conv
-        self.regress = nn.Sequential(nn.Linear(ch[0], ch[0]//2), 
-                                    nn.LeakyReLU(),
-                                    nn.Linear(ch[0]//2, 1))
-        
-        self.ch = ch
-        #self.dropout1 = nn.Dropout2d(0.25)
-
-    def forward(self, x, inference):
-
-        x = self.m[0](x[0])  # conv
-        bs, _, ny, nx = x.shape  
-        x = x.view(bs, self.no, ny, nx).permute(0, 2, 3, 1).contiguous()
-        
-        x0 = x[..., 0]
-        x1 = x[..., 1]
-        x1 = x1.view(-1, self.ch[0])
-        x1 = self.regress(x1)
-
-        if inference:  
-            #x[..., 0] = x[..., 0].sigmoid()
-            x0 = x0.sigmoid()
-
-        return x0, x1
-
-
-class Conv(nn.Module):
-    # Standard convolution
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
-        super(Conv, self).__init__()
-        self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p), groups=g, bias=False)
-        self.bn = nn.BatchNorm2d(c2)
-        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
-
-    def forward(self, x):
-        return self.act(self.bn(self.conv(x)))
-
-    def fuseforward(self, x):
-        return self.act(self.conv(x))
-
-
-def autopad(k, p=None):  # kernel, padding
-    # Pad to 'same'
-    if p is None:
-        p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
-    return p
-
-class Concat(nn.Module):
-    # Concatenate a list of tensors along dimension
-    def __init__(self, dimension=1):
-        super(Concat, self).__init__()
-        self.d = dimension
-
-    def forward(self, x):
-        return torch.cat(x, self.d)
-
-def make_divisible(x, divisor):
-    # Returns x evenly divisible by divisor
-    if isinstance(x, list):
-        x = x[0]
-    return math.ceil(x / divisor) * divisor
-
-
-
 class ComputeLoss:
     # Compute losses
     def __init__(self, model, autobalance=False):
@@ -203,10 +134,10 @@ class ComputeLoss:
         # Define criteria
         self.BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
         self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
-        self.MSELoss = nn.MSELoss()
+        self.MSELoss = nn.MSELoss(size_average=False)
         
 
-    def __call__(self, p0, p1, targets): 
+    def __call__(self, p0, targets): 
         device = targets.device
         lobj = torch.zeros(1, device=device)
         lcell = torch.zeros(1, device=device)
@@ -217,7 +148,7 @@ class ComputeLoss:
         # Losses
         b, gj, gi = indices[0]  
         tobj = torch.zeros_like(p0, device=device)  
-        tcell = torch.zeros_like(p1, device=device)   
+        tcell = torch.zeros_like(p0, device=device)   
 
         n = b.shape[0]  
         if n:
@@ -243,7 +174,7 @@ class ComputeLoss:
             for k, bi in enumerate(nonempty):
                 #indx = torch.where(b==bi)
                 #tcell[bi, gi[indx], gj[indx]] = float(count[k])
-                tcell[bi, 0] = float(count[k])
+                tcell[bi, :, :] = float(count[k])
             '''
                 #tcell[bi, :, :] = float(count[k])
                 #countInCell = p[bi, gi[indx], gj[indx], 1].mean()
@@ -262,16 +193,9 @@ class ComputeLoss:
                 lcountInNbr += torch.abs(countInNbr - CountInNbr_gt).mean()
             '''
 
-        lobj += self.BCEobj(p0, tobj)
-        lcell += torch.abs(p1 - tcell).mean()
-        #lcell += self.MSELoss(p1, tcell)
-        #countInCell = p[..., 1].view(p.size(0), -1).mean(1, keepdim=True).sum()
-        #countInCell_gt = tcell.view(p.size(0), -1).mean(1, keepdim=True).sum()
-        #lcountInCell += torch.abs(countInCell - countInCell_gt).mean()  
+        lcell += self.MSELoss(p0, tcell)
 
-        bs = tobj.shape[0]  # batch size
-
-        return (lobj * bs) + (lcell) + lcountInNbr, lobj.detach(), lcell.detach(), lcountInNbr.detach()
+        return lcell, lcell.detach()
 
 
     def build_targets(self, p0, targets):

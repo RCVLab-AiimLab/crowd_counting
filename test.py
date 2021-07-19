@@ -16,16 +16,16 @@ import torchvision.transforms.functional as F
 from torchvision import transforms
 import PIL.Image as Image
 from utils import zeropad, vis_input
-from model import Model
+from model import Model, CSRNet
 
 
 
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='shanghaiA, cell128/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiB, cell256, csrnet/', help="Set model description")
 parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
-parser.add_argument('--exp_sets', default='part_A_final/test_data')
+parser.add_argument('--exp_sets', default='part_B_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
@@ -34,10 +34,10 @@ parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
-parser.add_argument('--cell_size', default=128, type=int, help="cell size")
-parser.add_argument('--threshold', default=[0.1], help="[0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.2, 0.3, 0.4, 0.5], threshold for the classification output")
+parser.add_argument('--cell_size', default=256, type=int, help="cell size")
+parser.add_argument('--threshold', default=[0.9], help="[0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.2, 0.3, 0.4, 0.5], threshold for the classification output")
 
-parser.add_argument('--best', default=False, type=bool, help='best or last saved checkpoint?') 
+parser.add_argument('--best', default=True, type=bool, help='best or last saved checkpoint?') 
 parser.add_argument('--vis_patch', default=False, type=bool, help='visualize the patches') 
 parser.add_argument('--vis_image', default=False, type=bool, help='visualize the whole image') 
 parser.add_argument('--prob_map', default=False, type=bool, help='using threshold or probability map?') 
@@ -68,7 +68,7 @@ def test():
     else:
         args.checkpoint_path += 'checkpoint.pth.tar'
 
-    model = Model(args.model_file)
+    model = CSRNet()
 
     if CUDA:
         model = model.cuda()
@@ -160,20 +160,22 @@ def test():
                                 targets = targets.cuda()
 
                             with torch.no_grad():
-                                predictions0, predictions1 = model(imgs, training=False)
+                                predictions0 = model(imgs, training=False)
 
+                                img_name = img_path.replace('.jpg','').replace('/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset/' + args.exp_sets + '/images/','')
+                
                                 if args.vis_image:
-                                    vis_image(args, img_big, imgs, target_chips, ni, nj, predictions0, predictions1, thresh)
+                                    vis_image(args, img_name, img_big, imgs, target_chips, ni, nj, predictions0, predictions0, thresh)
                                 
                                 if args.vis_patch:
                                     im_i = imgs.size(0)//4
                                     vis_input(imgs[im_i, ...], target_chips[im_i, ...], predicted=predictions0[im_i, :, :], thresholded=predictions0[im_i, :, :] > thresh)
                             
                                 targets = targets.shape[0]
-                                pred_prob = (predictions0.view(predictions0.size(0), -1)).sum(1, keepdim=True)
+                                pred_prob = predictions0.view(predictions0.size(0), -1).mean(1, keepdim=True)
                                 pred_prob = pred_prob.sum()
                                 pred_thresh = (predictions0 > thresh).sum()
-                                pred_cell = predictions1.sum()
+                                pred_cell = predictions0.sum()
 
                                 mae_prob = abs(pred_prob - targets)
                                 mae_thresh = abs(pred_thresh - targets)
@@ -191,11 +193,9 @@ def test():
                                 s = str((bi, 'MAE: ', mae_prob.item(), 'pred: ', pred_prob.item(), 'target: ', targets))
                                 pbar.set_description(s)
 
-                                img_name = img_path.replace('.jpg','').replace('/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset/' + args.exp_sets + '/images/','')
-
                                 s = '{img:}\t *Target {targets:.0f}\t *Pred_Prob {pred_prob:.4f}\t *Pred_Thresh {pred_thresh:.4f}\t *Pred_Cell {pred_cell:.4f}\t *MAE_Prob {mae_prob:.4f}\t *MAE_Thresh {mae_thresh:.4f}\t *MAE_Cell {mae_cell:.4f} \n'.\
-                                    format(img=img_name, targets=targets, pred_prob=pred_prob, pred_thresh=pred_thresh, pred_cell=pred_cell, \
-                                        mae_prob=(pred_prob-targets), mae_thresh=(pred_thresh-targets), mae_cell=(pred_cell-targets))
+                                    format(img=img_name, targets=targets, pred_prob=pred_prob, pred_thresh=0, pred_cell=0, \
+                                        mae_prob=(pred_prob-targets), mae_thresh=(0), mae_cell=(0))
 
                                 f.writelines(s)
 
@@ -205,19 +205,22 @@ def test():
                                 b_num = 0
 
         print(' * MAE_Prob {mae_prob:.3f} \n  * MAE_Thresh {mae_th:.3f} \n * MSE_Prob {mse:.3f} \n * MAE_Cell {mae_cell:.3f} \n '.\
-            format(mae_prob=(sum_mae_prob/dataset_length).item(), mae_th=(sum_mae_th/dataset_length).item(), mse=(sum_mse/dataset_length).sqrt().item(), \
-                mae_cell=(sum_mae_cell/dataset_length)))
+            format(mae_prob=(sum_mae_prob/dataset_length).item(), mae_th=(0), mse=(sum_mse/dataset_length).sqrt().item(), \
+                mae_cell=(0)))
         
         print(' * MAE_Best {mae_best:.3f}'.format(mae_best=(sum_best/dataset_length).item()))
 
 
-def vis_image(args, img_big, imgs, target_chips, ni, nj, predictions0, predictions1, thresh):
+def vis_image(args, img_name, img_big, imgs, target_chips, ni, nj, predictions0, predictions1, thresh):
     import torch.nn as nn 
     import matplotlib.pyplot as plt
     import cv2 
 
-    upsample = nn.Upsample(scale_factor=8, mode='nearest')
-    upsample1 = nn.Upsample(scale_factor=128, mode='nearest')
+    in_size = imgs.size(2)
+    out_size = predictions0.size(1)
+
+    upsample = nn.Upsample(scale_factor=in_size//out_size, mode='nearest')
+    upsample1 = nn.Upsample(scale_factor=in_size, mode='nearest')
     img = torch.zeros_like(img_big)
     pred_prob = torch.zeros_like(img_big[0,:,:])
     pred_cell = torch.zeros_like(img_big[0,:,:])
@@ -237,26 +240,28 @@ def vis_image(args, img_big, imgs, target_chips, ni, nj, predictions0, predictio
             img[:, y1:y2, x1:x2] = imgs[k, ...]
             target[y1:y2, x1:x2] = target_chips[k, ...]
             pred_prob[y1:y2, x1:x2] = upsample(predictions0[k, :, :].unsqueeze(0).unsqueeze(0))
-            pred_cell[y1:y2, x1:x2] = upsample1(predictions1[k, :].unsqueeze(0).unsqueeze(0))
+            #pred_cell[y1:y2, x1:x2] = upsample1(predictions1[k, :].unsqueeze(0).unsqueeze(0))
 
     img = img.permute(1, 2, 0).cpu()
     img = cv2.normalize(np.float32(img), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
     img = img.astype(np.uint8)
     plt.subplot(3,2,1).imshow(img)
-    plt.subplot(3,2,2).imshow(target)
     count_gt = target.sum()
-    plt.title('People count: ' + str(count_gt.item()))
+    plt.title(img_name + ' - GT count: ' + str(count_gt.item()))
+    plt.subplot(3,2,2).imshow(target)
+    plt.title('GT')
     pred_prob = pred_prob / 64
     plt.subplot(3,2,3).imshow(pred_prob)
-    count_prob = pred_prob.sum()
-    plt.title('Pred_prob: ' + str(count_prob.round().item()) + '  MAE: ' + str((count_prob-count_gt).round().item()))
-    pred_thresh = pred_prob > thresh
-    count_thresh = pred_thresh.sum() / 64
-    plt.subplot(3,2,4).imshow(pred_thresh)
-    plt.title('Pred_thresh: ' + str(count_thresh.item()) + '  MAE: ' + str((count_thresh-count_gt).round().item()))
-    plt.subplot(3,2,5).imshow(pred_cell)
-    count_cell = predictions1.sum()      
-    plt.title('Pred_cell: ' + str(count_cell.round().item()) + '  MAE: ' + str((count_cell-count_gt).round().item()))
+    count_prob = predictions0.view(predictions0.size(0), -1).mean(1, keepdim=True)
+    count_prob = count_prob.sum()
+    plt.title('Pred count: ' + str(count_prob.round().item()) + '  MAE: ' + str((count_prob-count_gt).round().item()))
+    #pred_thresh = pred_prob > thresh
+    #count_thresh = pred_thresh.sum() / 64
+    #plt.subplot(3,2,4).imshow(pred_thresh)
+    #plt.title('Pred_thresh: ' + str(count_thresh.item()) + '  MAE: ' + str((count_thresh-count_gt).round().item()))
+    #plt.subplot(3,2,5).imshow(pred_cell)
+    #count_cell = predictions1.sum()      
+    #plt.title('Pred_cell: ' + str(count_cell.round().item()) + '  MAE: ' + str((count_cell-count_gt).round().item()))
     plt.show()
 
 
