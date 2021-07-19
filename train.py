@@ -20,14 +20,14 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='QCF-QNRF, darknet, countInCell, lr=1e-5/', help="Set model description")
+parser.add_argument('--model_desc', default='UCF-QNRF, darknet, countInCell, lr=1e-5/', help="Set model description")
 parser.add_argument('--train_json', default=path/'datasets/UCF-QNRF/Train.json', help='path to train json')
 parser.add_argument('--val_json', default=path/'datasets/UCF-QNRF/Test.json', help='path to test json')
 parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', default='/drive/work_dirs/crowd_counting_UCF-QNRF', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default='/drive/work_dirs/crowd_counting_UCF-QNRF/log', type=str, help='log dir')
+parser.add_argument('--checkpoint_path', default='/home/16amf8/data/work_dirs/crowd_counting_UCF-QNRF', type=str, help='checkpoint path')
+parser.add_argument('--log_dir', default='/home/16amf8/data/work_dirs/crowd_counting_UCF-QNRF/log', type=str, help='log dir')
 parser.add_argument('--exp', default='QNRF', type=str, help='set dataset for training experiment')
 
 # MODEL
@@ -37,7 +37,7 @@ parser.add_argument('--threshold', default=0.9, type=int, help="threshold for th
 
 
 # TRAINING
-parser.add_argument('--batch_size', default=256, type=int)
+parser.add_argument('--batch_size', default=512, type=int)
 parser.add_argument('--epochs', default=1000, type=int, help="Number of epochs to train for")
 parser.add_argument('--workers', default=1, type=int, help="Number of workers in loading dataset")
 parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")

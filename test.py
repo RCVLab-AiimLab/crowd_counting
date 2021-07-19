@@ -22,13 +22,13 @@ from model import Model
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='NWPU, darknet, countInCell, lr=1e-5/', help="Set model description")
-parser.add_argument('--dataset_path', default='/drive/datasets/NWPU-Crowd', help='path to dataset')
-parser.add_argument('--exp_sets', default='NWPU')
+parser.add_argument('--model_desc', default='UCF-QNRF, darknet, countInCell, lr=1e-5/', help="Set model description")
+parser.add_argument('--dataset_path', default='/home/16amf8/data/datasets/UCF-QNRF_ECCV18', help='path to dataset')
+parser.add_argument('--exp_sets', default='QNRF')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', default='/drive/work_dirs/crowd_counting_NWPU', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default='/drive/work_dirs/crowd_counting_NWPU/log', type=str, help='log dir')
+parser.add_argument('--checkpoint_path', default='/home/16amf8/data/work_dirs/crowd_counting_UCF-QNRF', type=str, help='checkpoint path')
+parser.add_argument('--log_dir', default='/home/16amf8/data/work_dirs/crowd_counting_UCF-QNRF/log', type=str, help='log dir')
 
 # MODEL
 parser.add_argument('--model_file', default='model.yaml')
@@ -57,6 +57,11 @@ def test():
     if ('NWPU' in args.exp_sets):
         img_paths = []
         with open('datasets/NWPU/val.json') as f:
+            data = json.load(f)
+        img_paths = data
+    elif ('QNRF' in args.exp_sets):
+        img_paths = []
+        with open('datasets/UCF-QNRF/Test.json') as f:
             data = json.load(f)
         img_paths = data
     else:
