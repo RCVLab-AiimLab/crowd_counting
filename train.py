@@ -21,10 +21,10 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiB, cell256, csrnet/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiB, cell128/', help="Set model description")
 parser.add_argument('--train_json', default=path/'datasets/shanghai/part_B_train.json', help='path to train json')
 parser.add_argument('--val_json', default=path/'datasets/shanghai/part_B_test.json', help='path to test json')
-parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
+parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default=path.parent/'runs/weights', type=str, help='checkpoint path')
@@ -34,7 +34,7 @@ parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
-parser.add_argument('--cell_size', default=256, type=int, help="cell size")
+parser.add_argument('--cell_size', default=128, type=int, help="cell size")
 parser.add_argument('--threshold', default=0.01, type=int, help="threshold for the classification output")
 
 # TRAINING
@@ -51,7 +51,7 @@ parser.add_argument('--adam', default=False, type=bool, help='use torch.optim.Ad
 
 def train(args, model, optimizer, train_list, val_list, train_list_depth, val_list_depth, tb_writer, CUDA):
 
-    compute_loss = ComputeLoss(model)
+    compute_loss = ComputeLoss(model, in_size=args.cell_size)
 
     for epoch in range(args.start_epoch, args.epochs):
         train_loader = torch.utils.data.DataLoader(listDataset(train_list,
@@ -282,8 +282,11 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
 
                             losses.update(loss.item(), imgs.size(0))
                             
+                            #predictions0, predictions1 = predictions[..., 0], predictions[..., 1]
                             targets = targets.shape[0]
-                            pred_prob = predictions0.view(predictions0.size(0), -1).mean(1, keepdim=True).sum()
+                            #pred_prob, _ = predictions0.view(predictions0.size(0), -1).max(1, keepdim=True)
+                            pred_prob = predictions0.sum()
+                            #pred_prob = pred_prob.sum()
                             pred_thresh = (predictions0 > args.threshold).sum()
                             pred_cell = predictions0.sum()
 
@@ -291,7 +294,7 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
                             mae_thresh += abs(pred_thresh - targets)
                             mae_cell += abs(pred_cell - targets)
 
-                            s = '*Target {targets:.0f}\t *Pred_Prob {pred_prob:.4f}\t *Pred_Thresh {pred_thresh:.4f}\t *Pred_Cell {pred_cell:.4f}\t *MAE_Prob {mae_prob:.4f}\t *MAE_Thresh {mae_thresh:.4f}\t *MAE_Cell {mae_cell:.4f} \n'.\
+                            s = '*Target {targets:.0f}\t *Pred {pred_prob:.4f}\t *Pred_Thresh {pred_thresh:.4f}\t *Pred_Cell {pred_cell:.4f}\t *MAE {mae_prob:.4f}\t *MAE_Thresh {mae_thresh:.4f}\t *MAE_Cell {mae_cell:.4f} \n'.\
                                 format(targets=targets, pred_prob=pred_prob, pred_thresh=0, pred_cell=0, \
                                     mae_prob=(pred_prob-targets), mae_thresh=(0), mae_cell=(0))
                             
@@ -352,7 +355,7 @@ def main():
 
     #model = Model(args.model_file, args.cell_size)
 
-    model = CSRNet()
+    model = CSRNet(in_size=args.cell_size)
 
     if CUDA:
         model = model.cuda()

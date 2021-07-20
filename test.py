@@ -23,21 +23,21 @@ from model import Model, CSRNet
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='shanghaiB, cell256, csrnet/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA, cell64/', help="Set model description")
 parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
-parser.add_argument('--exp_sets', default='part_B_final/test_data')
+parser.add_argument('--exp_sets', default='part_A_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default='../runs/log', type=str, help='log dir')
+parser.add_argument('--checkpoint_path', default='./runs/weights', type=str, help='checkpoint path')
+parser.add_argument('--log_dir', default='./runs/log', type=str, help='log dir')
 parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
-parser.add_argument('--cell_size', default=256, type=int, help="cell size")
+parser.add_argument('--cell_size', default=64, type=int, help="cell size")
 parser.add_argument('--threshold', default=[0.9], help="[0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.2, 0.3, 0.4, 0.5], threshold for the classification output")
 
-parser.add_argument('--best', default=True, type=bool, help='best or last saved checkpoint?') 
+parser.add_argument('--best', default=False, type=bool, help='best or last saved checkpoint?') 
 parser.add_argument('--vis_patch', default=False, type=bool, help='visualize the patches') 
 parser.add_argument('--vis_image', default=False, type=bool, help='visualize the whole image') 
 parser.add_argument('--prob_map', default=False, type=bool, help='using threshold or probability map?') 
@@ -68,7 +68,7 @@ def test():
     else:
         args.checkpoint_path += 'checkpoint.pth.tar'
 
-    model = CSRNet()
+    model = CSRNet(in_size=args.cell_size)
 
     if CUDA:
         model = model.cuda()
@@ -172,8 +172,9 @@ def test():
                                     vis_input(imgs[im_i, ...], target_chips[im_i, ...], predicted=predictions0[im_i, :, :], thresholded=predictions0[im_i, :, :] > thresh)
                             
                                 targets = targets.shape[0]
-                                pred_prob = predictions0.view(predictions0.size(0), -1).mean(1, keepdim=True)
-                                pred_prob = pred_prob.sum()
+                                #pred_prob = predictions0.view(predictions0.size(0), -1).mean(1, keepdim=True)
+                                #pred_prob = pred_prob.sum()
+                                pred_prob = predictions0.sum()
                                 pred_thresh = (predictions0 > thresh).sum()
                                 pred_cell = predictions0.sum()
 
@@ -239,8 +240,8 @@ def vis_image(args, img_name, img_big, imgs, target_chips, ni, nj, predictions0,
             k += 1
             img[:, y1:y2, x1:x2] = imgs[k, ...]
             target[y1:y2, x1:x2] = target_chips[k, ...]
-            pred_prob[y1:y2, x1:x2] = upsample(predictions0[k, :, :].unsqueeze(0).unsqueeze(0))
-            #pred_cell[y1:y2, x1:x2] = upsample1(predictions1[k, :].unsqueeze(0).unsqueeze(0))
+            #pred_prob[y1:y2, x1:x2] = upsample(predictions0[k, :, :].unsqueeze(0).unsqueeze(0))
+            pred_prob[y1:y2, x1:x2] = upsample1(predictions1[k, :].unsqueeze(0).unsqueeze(0))
 
     img = img.permute(1, 2, 0).cpu()
     img = cv2.normalize(np.float32(img), None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
@@ -250,10 +251,10 @@ def vis_image(args, img_name, img_big, imgs, target_chips, ni, nj, predictions0,
     plt.title(img_name + ' - GT count: ' + str(count_gt.item()))
     plt.subplot(3,2,2).imshow(target)
     plt.title('GT')
-    pred_prob = pred_prob / 64
+    #pred_prob = pred_prob / 64
     plt.subplot(3,2,3).imshow(pred_prob)
-    count_prob = predictions0.view(predictions0.size(0), -1).mean(1, keepdim=True)
-    count_prob = count_prob.sum()
+    #count_prob = predictions0.view(predictions0.size(0), -1).sum(1, keepdim=True)
+    count_prob = pred_prob.sum() / (in_size**2)
     plt.title('Pred count: ' + str(count_prob.round().item()) + '  MAE: ' + str((count_prob-count_gt).round().item()))
     #pred_thresh = pred_prob > thresh
     #count_thresh = pred_thresh.sum() / 64

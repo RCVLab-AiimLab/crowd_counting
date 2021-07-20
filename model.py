@@ -12,19 +12,24 @@ from torchvision import models
 
 
 class CSRNet(nn.Module):
-    def __init__(self, load_weights=False):
+    def __init__(self, load_weights=False, in_size=128):
         super(CSRNet, self).__init__()
         self.seen = 0
         self.frontend_feat = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512]
-        self.backend_feat  = [512, 512, 512,256,128,64]
+        self.backend_feat  = [512, 512, 512, 256, 128, 64]
         self.frontend = make_layers(self.frontend_feat)
-        self.backend = make_layers(self.backend_feat,in_channels = 512,dilation = True)
+        self.backend = make_layers(self.backend_feat, in_channels=512, dilation=True)
         self.output_layer = nn.Conv2d(64, 1, kernel_size=1)
         if not load_weights:
-            mod = models.vgg16(pretrained = True)
+            mod = models.vgg16(pretrained=True)
             self._initialize_weights()
             for i in range(len(self.frontend.state_dict().items())):
                 list(self.frontend.state_dict().items())[i][1].data[:] = list(mod.state_dict().items())[i][1].data[:]
+
+        self.in_size = (in_size // 8)**2
+        self.regress = nn.Sequential(nn.Linear(self.in_size, self.in_size//2), 
+                                    nn.LeakyReLU(),
+                                    nn.Linear(self.in_size//2, 1))
 
 
     def forward(self, x, training=True):
@@ -32,6 +37,8 @@ class CSRNet(nn.Module):
         x = self.backend(x)
         x = self.output_layer(x)
         x = x.squeeze(1)
+        x = x.view(-1, self.in_size)
+        x = self.regress(x)
         return x
 
 
@@ -127,32 +134,35 @@ def initialize_weights(model):
 
 class ComputeLoss:
     # Compute losses
-    def __init__(self, model, autobalance=False):
+    def __init__(self, model, autobalance=False, in_size=128):
         super(ComputeLoss, self).__init__()
         device = next(model.parameters()).device  # get model device
 
         # Define criteria
+        self.MSELoss = nn.MSELoss(reduction='sum')
         self.BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
         self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
-        self.MSELoss = nn.MSELoss(size_average=False)
-        
+        self.in_size = in_size
 
-    def __call__(self, p0, targets): 
+    def __call__(self, p, targets): 
         device = targets.device
-        lobj = torch.zeros(1, device=device)
+        #lobj = torch.zeros(1, device=device)
         lcell = torch.zeros(1, device=device)
-        lcountInCell = torch.zeros(1, device=device)
-        lcountInNbr = torch.zeros(1, device=device)
-        indices, neighbors = self.build_targets(p0, targets) 
+        #lcountInCell = torch.zeros(1, device=device)
+        #lcountInNbr = torch.zeros(1, device=device)
+        indices, _ = self.build_targets(p, targets) 
 
+        #p0 = p[..., 0]
+        #p1 = p[..., 1]
+        
         # Losses
         b, gj, gi = indices[0]  
-        tobj = torch.zeros_like(p0, device=device)  
-        tcell = torch.zeros_like(p0, device=device)   
+        tobj = torch.zeros_like(p, device=device)  
+        tcell = torch.zeros_like(p, device=device)   
 
         n = b.shape[0]  
         if n:
-            tobj[b, gi, gj] = 1 
+            #tobj[b, gi, gj] = 1 
 
             nonempty, count = torch.unique(b, return_counts=True) 
             '''
@@ -168,13 +178,12 @@ class ComputeLoss:
                     for j in range(1,9):
                         if nbrs_coord[i, 0] == coords[j, 0] and nbrs_coord[i, 1] == coords[j, 1]:
                             nbrs_cell[bi, j-1] = nonempty[i]
-            
-            
             '''
             for k, bi in enumerate(nonempty):
                 #indx = torch.where(b==bi)
                 #tcell[bi, gi[indx], gj[indx]] = float(count[k])
-                tcell[bi, :, :] = float(count[k])
+                #tcell[bi, :, :] = float(count[k])
+                tcell[bi, 0] = float(count[k])
             '''
                 #tcell[bi, :, :] = float(count[k])
                 #countInCell = p[bi, gi[indx], gj[indx], 1].mean()
@@ -193,9 +202,12 @@ class ComputeLoss:
                 lcountInNbr += torch.abs(countInNbr - CountInNbr_gt).mean()
             '''
 
-        lcell += self.MSELoss(p0, tcell)
-
-        return lcell, lcell.detach()
+        #lobj += self.BCEcls(p0, tobj)
+        lcell += self.MSELoss(p, tcell)
+        
+        bs = tobj.shape[0]
+        
+        return  lcell, lcell.detach()
 
 
     def build_targets(self, p0, targets):
@@ -204,7 +216,7 @@ class ComputeLoss:
 
         gain = torch.ones(5, device=targets.device)  # normalized to gridspace gain
         
-        gain[1:3] = torch.tensor(p0.shape)[[2, 1]]  # xyxy gain
+        gain[1:3] = torch.tensor((self.in_size//8, self.in_size//8)) #torch.tensor(p0.shape)[[2, 1]]  # xyxy gain
         t = targets * gain
 
         b = t[:, 0].long().T  # image, class

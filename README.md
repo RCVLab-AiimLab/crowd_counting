@@ -8,3 +8,11 @@ The final count is the summation of predicted heads in all cells.
 
 
 ## Usage
+
+## Results 
+
+| Datasets        | MAE   | Method              | Parameters                        | STAT MAE |
+| --------------- |:-----:| -------------------:|:---------------------------------:|:--------:|
+| Shanghai A      | 102   | Grid-CSRNet         | LR=1e-4, cell=64, epoch=50        |          |
+| Shanghai B      | 19    | Grid-CSRNet-FC      | LR=1e-4, cell=64, epoch=20        |          | 
+|                 |       |                     |                                   |          |
