@@ -28,8 +28,8 @@ parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/Sh
 parser.add_argument('--exp_sets', default='part_A_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', default='./runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default='./runs/log', type=str, help='log dir')
+parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
+parser.add_argument('--log_dir', default='../runs/log', type=str, help='log dir')
 parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
 # MODEL
