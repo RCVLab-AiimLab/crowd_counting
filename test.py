@@ -39,7 +39,7 @@ parser.add_argument('--threshold', default=[0.9], help="[0.04, 0.05, 0.06, 0.07,
 
 parser.add_argument('--best', default=False, type=bool, help='best or last saved checkpoint?') 
 parser.add_argument('--vis_patch', default=False, type=bool, help='visualize the patches') 
-parser.add_argument('--vis_image', default=False, type=bool, help='visualize the whole image') 
+parser.add_argument('--vis_image', default=True, type=bool, help='visualize the whole image') 
 parser.add_argument('--prob_map', default=False, type=bool, help='using threshold or probability map?') 
 
 
@@ -194,7 +194,7 @@ def test():
                                 s = str((bi, 'MAE: ', mae_prob.item(), 'pred: ', pred_prob.item(), 'target: ', targets))
                                 pbar.set_description(s)
 
-                                s = '{img:}\t *Target {targets:.0f}\t *Pred_Prob {pred_prob:.4f}\t *Pred_Thresh {pred_thresh:.4f}\t *Pred_Cell {pred_cell:.4f}\t *MAE_Prob {mae_prob:.4f}\t *MAE_Thresh {mae_thresh:.4f}\t *MAE_Cell {mae_cell:.4f} \n'.\
+                                s = '{img:}\t *Target {targets:.0f}\t *Pred_Prob {pred_prob:.3f}\t *Pred_Thresh {pred_thresh:.3f}\t *Pred_Cell {pred_cell:.3f}\t *MAE_Prob {mae_prob:.3f}\t *MAE_Thresh {mae_thresh:.3f}\t *MAE_Cell {mae_cell:.3f} \n'.\
                                     format(img=img_name, targets=targets, pred_prob=pred_prob, pred_thresh=0, pred_cell=0, \
                                         mae_prob=(pred_prob-targets), mae_thresh=(0), mae_cell=(0))
 

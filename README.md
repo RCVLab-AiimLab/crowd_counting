@@ -16,4 +16,12 @@ Run train.py
 |:--------------- |:-----:|:--------------------|:----------------------------------|:--------:|
 | Shanghai A      | 102   | Grid-CSRNet         | LR=1e-4, cell=64, epoch=50        |    61    |
 | Shanghai B      | 19    | Grid-CSRNet-FC      | LR=1e-4, cell=64, epoch=20        |     8    | 
-|                 |       |                     |                                   |          |
+| Shanghai A      | 97    | Grid-CSRNet-FC      | LR=1e-4, cell=64, epoch=40        |    61    |                |       |                 |       |                     |                                   |          |
+
+<details>
+  <summary>Table Notes (click to expand)</summary>
+  
+  * Grid-CSRNet denotes grid-based CSRNet architecture
+  * FC denotes fully connected layer 
+  * LR = learning rate
+</details>

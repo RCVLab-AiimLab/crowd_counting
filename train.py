@@ -21,10 +21,10 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiB, cell128/', help="Set model description")
-parser.add_argument('--train_json', default=path/'datasets/shanghai/part_B_train.json', help='path to train json')
-parser.add_argument('--val_json', default=path/'datasets/shanghai/part_B_test.json', help='path to test json')
-parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
+parser.add_argument('--model_desc', default='shanghaiA, cell64/', help="Set model description")
+parser.add_argument('--train_json', default=path/'datasets/shanghai/part_A_train.json', help='path to train json')
+parser.add_argument('--val_json', default=path/'datasets/shanghai/part_A_test.json', help='path to test json')
+parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default=path.parent/'runs/weights', type=str, help='checkpoint path')
@@ -34,7 +34,7 @@ parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
-parser.add_argument('--cell_size', default=128, type=int, help="cell size")
+parser.add_argument('--cell_size', default=64, type=int, help="cell size")
 parser.add_argument('--threshold', default=0.01, type=int, help="threshold for the classification output")
 
 # TRAINING
@@ -43,7 +43,7 @@ parser.add_argument('--epochs', default=1000, type=int, help="Number of epochs t
 parser.add_argument('--workers', default=4, type=int, help="Number of workers in loading dataset")
 parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
-parser.add_argument('--lr0', default=0.0001, type=float, help="initial learning rate")
+parser.add_argument('--lr0', default=0.0000001, type=float, help="initial learning rate")
 parser.add_argument('--weight_decay', default=0.0005, type=float, help="weight_decay")
 parser.add_argument('--momentum', default=0.937, type=float, help="momentum")
 parser.add_argument('--adam', default=False, type=bool, help='use torch.optim.Adam() optimizer') 
@@ -294,7 +294,7 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
                             mae_thresh += abs(pred_thresh - targets)
                             mae_cell += abs(pred_cell - targets)
 
-                            s = '*Target {targets:.0f}\t *Pred {pred_prob:.4f}\t *Pred_Thresh {pred_thresh:.4f}\t *Pred_Cell {pred_cell:.4f}\t *MAE {mae_prob:.4f}\t *MAE_Thresh {mae_thresh:.4f}\t *MAE_Cell {mae_cell:.4f} \n'.\
+                            s = '*Target {targets:.0f}\t *Pred {pred_prob:.3f}\t *Pred_Thresh {pred_thresh:.3f}\t *Pred_Cell {pred_cell:.3f}\t *MAE {mae_prob:.3f}\t *MAE_Thresh {mae_thresh:.3f}\t *MAE_Cell {mae_cell:.3f} \n'.\
                                 format(targets=targets, pred_prob=pred_prob, pred_thresh=0, pred_cell=0, \
                                     mae_prob=(pred_prob-targets), mae_thresh=(0), mae_cell=(0))
                             

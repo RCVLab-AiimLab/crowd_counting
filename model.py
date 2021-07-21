@@ -139,6 +139,7 @@ class ComputeLoss:
         device = next(model.parameters()).device  # get model device
 
         # Define criteria
+        #self.MSELoss = nn.MSELoss(reduction='mean') 
         self.MSELoss = nn.MSELoss(reduction='sum')
         self.BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
         self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
@@ -205,7 +206,7 @@ class ComputeLoss:
         #lobj += self.BCEcls(p0, tobj)
         lcell += self.MSELoss(p, tcell)
         
-        bs = tobj.shape[0]
+        #bs = tobj.shape[0]
         
         return  lcell, lcell.detach()
 
