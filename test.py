@@ -23,9 +23,9 @@ from model import Model, CSRNet
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='shanghaiA, cell64/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA, cell128, lr6_FC2/', help="Set model description")
 parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
-parser.add_argument('--exp_sets', default='part_A_final/test_data')
+parser.add_argument('--exp_sets', default='part_B_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
@@ -34,12 +34,12 @@ parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
-parser.add_argument('--cell_size', default=64, type=int, help="cell size")
+parser.add_argument('--cell_size', default=128, type=int, help="cell size")
 parser.add_argument('--threshold', default=[0.9], help="[0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.2, 0.3, 0.4, 0.5], threshold for the classification output")
 
 parser.add_argument('--best', default=False, type=bool, help='best or last saved checkpoint?') 
 parser.add_argument('--vis_patch', default=False, type=bool, help='visualize the patches') 
-parser.add_argument('--vis_image', default=True, type=bool, help='visualize the whole image') 
+parser.add_argument('--vis_image', default=False, type=bool, help='visualize the whole image') 
 parser.add_argument('--prob_map', default=False, type=bool, help='using threshold or probability map?') 
 
 

@@ -16,7 +16,8 @@ Run train.py
 |:--------------- |:-----:|:--------------------|:----------------------------------|:--------:|
 | Shanghai A      | 102   | Grid-CSRNet         | LR=1e-4, cell=64, epoch=50        |    61    |
 | Shanghai B      | 19    | Grid-CSRNet-FC      | LR=1e-4, cell=64, epoch=20        |     8    | 
-| Shanghai A      | 97    | Grid-CSRNet-FC      | LR=1e-4, cell=64, epoch=40        |    61    |                |       |                 |       |                     |                                   |          |
+| Shanghai A      | 97    | Grid-CSRNet-FC      | LR=1e-4, cell=64, epoch=40        |    61    |  
+| Shanghai A      | 91    | Grid-CSRNet-2FC     | LR=1e-6, cell=64, epoch=70        |    61    |     
 
 <details>
   <summary>Table Notes (click to expand)</summary>

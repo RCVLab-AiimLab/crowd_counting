@@ -29,7 +29,10 @@ class CSRNet(nn.Module):
         self.in_size = (in_size // 8)**2
         self.regress = nn.Sequential(nn.Linear(self.in_size, self.in_size//2), 
                                     nn.LeakyReLU(),
+                                    nn.Linear(self.in_size//2, self.in_size//2), 
+                                    nn.LeakyReLU(),
                                     nn.Linear(self.in_size//2, 1))
+
 
 
     def forward(self, x, training=True):
