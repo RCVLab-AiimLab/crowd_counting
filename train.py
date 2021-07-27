@@ -21,15 +21,15 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiA, cell128, lr7, 2ch/', help="Set model description")
-parser.add_argument('--train_json', default=path/'datasets/shanghai/part_A_train.json', help='path to train json')
-parser.add_argument('--val_json', default=path/'datasets/shanghai/part_A_test.json', help='path to test json')
+parser.add_argument('--model_desc', default='UCF-QNRF, cell128, lr7, 2ch/', help="Set model description")
+parser.add_argument('--train_json', default=path/'datasets/UCF-QNRF/Train.json', help='path to train json')
+parser.add_argument('--val_json', default=path/'datasets/UCF-QNRF/Test.json', help='path to test json')
 parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', default=path.parent/'runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default=path.parent/'runs/log', type=str, help='log dir')
-parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
+parser.add_argument('--checkpoint_path', default=path.parent/'/drive/work_dirs/crowd_counting_UCF-QNRF', type=str, help='checkpoint path')
+parser.add_argument('--log_dir', default=path.parent/'/drive/work_dirs/crowd_counting_UCF-QNRF/log', type=str, help='log dir')
+parser.add_argument('--exp', default='QNRF', type=str, help='set dataset for training experiment')
 parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
 # MODEL
@@ -38,9 +38,9 @@ parser.add_argument('--cell_size', default=128, type=int, help="cell size")
 parser.add_argument('--threshold', default=0.01, type=int, help="threshold for the classification output")
 
 # TRAINING
-parser.add_argument('--batch_size', default=512, type=int)
+parser.add_argument('--batch_size', default=128, type=int)
 parser.add_argument('--epochs', default=1000, type=int, help="Number of epochs to train for")
-parser.add_argument('--workers', default=4, type=int, help="Number of workers in loading dataset")
+parser.add_argument('--workers', default=1, type=int, help="Number of workers in loading dataset")
 parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
 parser.add_argument('--lr0', default=0.0000001, type=float, help="initial learning rate")
@@ -63,7 +63,8 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
                        train=True, 
                        seen=0,
                        batch_size=1,
-                       num_workers=args.workers))
+                       num_workers=args.workers,
+                       exp=args.exp))
 
         losses = AverageMeter()
         losses_loc = AverageMeter()
@@ -134,8 +135,8 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
 
                     b_num += 1
 
-                    #if b_num >= args.batch_size:
-                    if i == (ni-1) and j == (nj-1):
+                    if b_num >= args.batch_size:
+                    #if i == (ni-1) and j == (nj-1):
                         imgs = torch.stack(imgs, dim=0).squeeze(1)
                         targets = [ti for ti in targets if len(ti) != 0]
                         if not targets:
@@ -207,7 +208,8 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
                     depth=args.depth,
                     transform1=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
                     transform2=transforms.Compose([transforms.ToTensor(),]), 
-                    train=False), 
+                    train=False,
+                    exp=args.exp), 
                     batch_size=1)    
     
     model.eval()
@@ -337,6 +339,14 @@ def main():
         else:
             train_list_depth = None
             val_list_depth = None
+    elif args.exp == 'QNRF':
+        train_list_depth = None
+        val_list_depth = None
+
+        with open(args.train_json, 'r') as outfile:
+            train_list = json.load(outfile)
+        with open(args.val_json, 'r') as outfile:
+            val_list = json.load(outfile)
 
     if args.use_gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.device

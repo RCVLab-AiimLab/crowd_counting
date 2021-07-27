@@ -8,7 +8,7 @@ from PIL import Image
 import torchvision.transforms.functional as F
 
 class listDataset(Dataset):
-    def __init__(self, root, depthroot, shape=None, depth=False, shuffle=True, transform1=None, transform2=None, train=False, seen=0, batch_size=1, num_workers=4):
+    def __init__(self, root, depthroot, shape=None, depth=False, shuffle=True, transform1=None, transform2=None, train=False, seen=0, batch_size=1, num_workers=1, exp='shanghai'):
         #if shuffle==True:
         if depth:
             main_root = list(zip(root, depthroot))
@@ -29,6 +29,7 @@ class listDataset(Dataset):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.depth = depth
+        self.exp = exp
         
     def __len__(self):
         return self.nSamples
@@ -43,7 +44,7 @@ class listDataset(Dataset):
             img_depth_path = None
 
         
-        img, target, img_depth = load_data(img_path, img_depth_path, self.train, depth=self.depth)
+        img, target, img_depth = load_data(img_path, img_depth_path, self.train, depth=self.depth, exp=self.exp)
         
         #img = 255.0 * F.to_tensor(img)
         
@@ -60,15 +61,30 @@ class listDataset(Dataset):
         return img, target, img_depth
 
 
-def load_data(img_path, depth_path=None, train=True, depth=False):
-    gt_path = img_path.replace('.jpg','_nofilter.h5').replace('images','ground_truth')
-    img = Image.open(img_path).convert('RGB')
-    gt_file = h5py.File(gt_path)
-    target = np.asarray(gt_file['density'])
-    img_depth = torch.zeros(1)
-    if depth:
-        h5 = h5py.File(depth_path,'r')
-        img_depth = h5['depth'][:]
+def load_data(img_path, depth_path=None, train=True, depth=False, exp='shanghai'):
+    if (exp == 'shanghai'):
+        gt_path = img_path.replace('.jpg','_nofilter.h5').replace('images','ground_truth')
+        img = Image.open(img_path).convert('RGB')
+        gt_file = h5py.File(gt_path)
+        target = np.asarray(gt_file['density'])
+        img_depth = torch.zeros(1)
+        if depth:
+            h5 = h5py.File(depth_path,'r')
+            img_depth = h5['depth'][:]
+    elif (exp == 'QNRF'):
+        phase = ''
+        if ('Train' in img_path):
+            phase = 'Train'
+        elif ('Test' in img_path):
+            phase = 'Test'
+        else:
+            print('ERROR, invalid img_path')
+            return
+        gt_path = img_path.replace('.jpg', '_nofilter.h5').replace(phase, 'ground_truth/{}'.format(phase))
+        img = Image.open(img_path).convert('RGB')
+        gt_file = h5py.File(gt_path)
+        target = np.asarray(gt_file['density'])
+        img_depth = torch.zeros(1)
     
     return img, target, img_depth
     

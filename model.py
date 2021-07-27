@@ -162,7 +162,8 @@ class ComputeLoss:
         gain = torch.ones(5, device=targets.device)  # normalized to gridspace gain
         
         gain[1:3] = torch.tensor((self.in_size//8, self.in_size//8)) #torch.tensor(p0.shape)[[2, 1]]  # xyxy gain
-        t = targets * gain
+        
+        t = targets[:, :3] * gain[:3]
 
         b = t[:, 0].long().T  
         gxy = t[:, 1:3]  # grid xy
