@@ -23,14 +23,15 @@ from model import CSRNet
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='shanghaiA, cell128, lr7, 2ch/', help="Set model description")
-parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
-parser.add_argument('--exp_sets', default='part_A_final/test_data')
+parser.add_argument('--model_desc', default='UCF-QNRF, cell128, lr7, 2ch/', help="Set model description")
+parser.add_argument('--dataset_path', default='/drive/datasets/UCF-QNRF_ECCV18', help='path to dataset')
+parser.add_argument('--exp_sets', default='QNRF')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', default='../runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default='../runs/log', type=str, help='log dir')
+parser.add_argument('--checkpoint_path', default='/drive/work_dirs/crowd_counting_UCF-QNRF', type=str, help='checkpoint path')
+parser.add_argument('--log_dir', default='/drive/work_dirs/crowd_counting_UCF-QNRF/log', type=str, help='log dir')
 parser.add_argument('--depth', default=False, type=bool, help='using depth?')
+parser.add_argument('--batch_size', default=128, type=int, help='batch size')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
@@ -40,7 +41,7 @@ parser.add_argument('--threshold', default=0.1, help="[0.04, 0.05, 0.06, 0.07, 0
 parser.add_argument('--best', default=False, type=bool, help='best or last saved checkpoint?') 
 parser.add_argument('--vis_patch', default=False, type=bool, help='visualize the patches') 
 parser.add_argument('--vis_image', default=False, type=bool, help='visualize the whole image') 
-parser.add_argument('--prob_map', default=False, type=bool, help='using threshold or probability map?') 
+parser.add_argument('--prob_map', default=True, type=bool, help='using threshold or probability map?') 
 
 
 
@@ -56,11 +57,17 @@ def test():
     else:
         CUDA = False
 
-    path_sets = [os.path.join(args.dataset_path, args.exp_sets,'images')]
-    img_paths = []
-    for path in path_sets:
-        for img_path in glob.glob(os.path.join(path, '*.jpg')):
-            img_paths.append(img_path)
+    if ('QNRF' in args.exp_sets):
+        img_paths = []
+        with open('datasets/UCF-QNRF/Test.json') as f:
+            data = json.load(f)
+        img_paths = data
+    else:
+        path_sets = [os.path.join(args.dataset_path, args.exp_sets,'images')]
+        img_paths = []
+        for path in path_sets:
+            for img_path in glob.glob(os.path.join(path, '*.jpg')):
+                img_paths.append(img_path)
     
     args.checkpoint_path += ('/'+args.model_desc)
     if args.best:
@@ -146,9 +153,16 @@ def test():
                     
                     b_num += 1
 
-                    if i == (ni-1) and j == (nj-1):
+                    #if i == (ni-1) and j == (nj-1):
+                    if b_num >= args.batch_size:
                         imgs = torch.stack(imgs, dim=0).squeeze(1)
                         targets = [ti for ti in targets if len(ti) != 0]
+                        if (len(targets) <= 0):
+                            b_num = 0
+                            imgs = []
+                            targets = []
+                            target_chips = []
+                            continue
                         targets = torch.cat(targets)
 
                         target_chips = torch.stack(target_chips, dim=0).squeeze(1)
@@ -160,7 +174,8 @@ def test():
                         with torch.no_grad():
                             predictions0, predictions1 = model(imgs, training=False)
 
-                            img_name = img_path.replace('.jpg','').replace('/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset/' + args.exp_sets + '/images/','')
+                
+                            img_name = img_path.replace('.jpg','').replace('/drive/datasets/ShanghaiTech_Crowd_Counting_Dataset/' + args.exp_sets + '/images/','')
             
                             if args.vis_image:
                                 vis_image(args, img_name, img_big, imgs, target_chips, ni, nj, predictions0, predictions1, args.threshold)

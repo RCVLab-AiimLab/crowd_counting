@@ -24,7 +24,7 @@ parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 parser.add_argument('--model_desc', default='UCF-QNRF, cell128, lr7, 2ch/', help="Set model description")
 parser.add_argument('--train_json', default=path/'datasets/UCF-QNRF/Train.json', help='path to train json')
 parser.add_argument('--val_json', default=path/'datasets/UCF-QNRF/Test.json', help='path to test json')
-parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
+parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default=path.parent/'/drive/work_dirs/crowd_counting_UCF-QNRF', type=str, help='checkpoint path')
@@ -39,9 +39,9 @@ parser.add_argument('--threshold', default=0.01, type=int, help="threshold for t
 
 # TRAINING
 parser.add_argument('--batch_size', default=128, type=int)
-parser.add_argument('--epochs', default=1000, type=int, help="Number of epochs to train for")
+parser.add_argument('--epochs', default=100, type=int, help="Number of epochs to train for")
 parser.add_argument('--workers', default=1, type=int, help="Number of workers in loading dataset")
-parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
+parser.add_argument('--start_epoch', default=10, type=int, help="start_epoch")
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
 parser.add_argument('--lr0', default=0.0000001, type=float, help="initial learning rate")
 parser.add_argument('--weight_decay', default=0.0005, type=float, help="weight_decay")
@@ -188,7 +188,7 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
             'arch': args.checkpoint_path,
             'state_dict': model.state_dict(),
             'best_pred': args.best_mae,
-            'optimizer' : optimizer.state_dict(),}, is_best, args.checkpoint_path)
+            'optimizer' : optimizer.state_dict(),}, False, args.checkpoint_path)
         
         tb_writer.add_scalar('train loss/total', losses.avg, epoch)
         tb_writer.add_scalar('train loss/loc', losses_loc.avg, epoch)
@@ -267,9 +267,15 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
 
                     b_num += 1
 
-                    if i == (ni-1) and j == (nj-1):
+                    #if i == (ni-1) and j == (nj-1):
+                    if b_num >= args.batch_size:
                         imgs = torch.stack(imgs, dim=0).squeeze(1)
                         targets = [ti for ti in targets if len(ti) != 0]
+                        if (len(targets) <= 0):
+                            b_num = 0
+                            targets = []
+                            imgs = []
+                            continue
                         targets = torch.cat(targets)
 
                         if CUDA:
