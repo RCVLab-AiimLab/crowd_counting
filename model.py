@@ -8,6 +8,7 @@ import torch.nn as nn
 import cv2 
 from itertools import product, starmap
 from torchvision import models
+import segmentation_models_pytorch as smp 
 
 
 class CSRNet(nn.Module):
@@ -19,7 +20,7 @@ class CSRNet(nn.Module):
         self.frontend_feat  = [512, 512, 512, 256, 128, 64]
         self.backend = make_layers(self.backend_feat, in_channels=3)
         self.frontend = make_layers(self.frontend_feat, in_channels=512, dilation=True)
-        self.output_layer = nn.Conv2d(64, 2, kernel_size=1)
+        self.output_layer = nn.Conv2d(64, 1, kernel_size=1)
         
         if not load_weights:
             mod = models.vgg16(pretrained=True)
@@ -27,28 +28,39 @@ class CSRNet(nn.Module):
             for i in range(len(self.backend.state_dict().items())):
                 list(self.backend.state_dict().items())[i][1].data[:] = list(mod.state_dict().items())[i][1].data[:]
         
-        self.in_size = (in_size // 8)**2
-        self.regress = nn.Sequential(nn.Linear(self.in_size, self.in_size//2), 
-                                    nn.LeakyReLU(),
-                                    nn.Linear(self.in_size//2, self.in_size//2), 
-                                    nn.LeakyReLU(),
-                                    nn.Linear(self.in_size//2, 1))
+        
+        bilinear = False
+        factor = 2 if bilinear else 1
+        self.up1 = Up(512, 256 // factor, bilinear)
+        self.up2 = Up(256, 128 // factor, bilinear)
+        self.outc1 = OutConv(256, 1)
+        self.outc2 = OutConv(128, 1)
         
         self.info(verbose=verbose)
 
 
     def forward(self, x, training=True):
         x = self.backend(x)
-        x = self.frontend(x)
-        x = self.output_layer(x)
-        x = x.permute(0, 2, 3, 1).contiguous()
-        x0 = x[..., 0]
-        x1 = x[..., 1]
-        #x = x.squeeze(1)
-        x1 = x1.view(-1, self.in_size)
-        x1 = self.regress(x1)
+        
+        x0 = self.frontend(x)
+        x0 = self.output_layer(x0) 
+        x0 = x0.squeeze(1) # count_0
 
-        return x0, x1
+        x = self.up1(x)
+        x1 = self.outc1(x)
+        x1 = x1.squeeze(1) # count_1
+
+        x2 = self.up2(x) 
+        x2 = self.outc2(x2) 
+        x2 = x2.squeeze(1) # count_2
+
+        '''# uncomment if binary loss is used
+        if not training: 
+            x0 = x0.sigmoid()
+            x1 = x1.sigmoid()
+            x2 = x2.sigmoid()
+        '''    
+        return x0, x1, x2
 
 
     def _initialize_weights(self):
@@ -64,6 +76,56 @@ class CSRNet(nn.Module):
                 
     def info(self, verbose=False):  # print model information
         model_info(self, verbose)
+
+
+class Up(nn.Module):
+    """Upscaling then double conv"""
+
+    def __init__(self, in_channels, out_channels, bilinear=True):
+        super().__init__()
+
+        # if bilinear, use the normal convolutions to reduce the number of channels
+        if bilinear:
+            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+            self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
+        else:
+            self.up = nn.ConvTranspose2d(in_channels , in_channels // 2, kernel_size=2, stride=2)
+            self.conv = DoubleConv(in_channels//2, out_channels)
+
+
+    def forward(self, x1):
+        x1 = self.up(x1)
+
+        return self.conv(x1)
+
+
+class OutConv(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(OutConv, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+
+    def forward(self, x):
+        return self.conv(x)
+
+
+class DoubleConv(nn.Module):
+    """(convolution => [BN] => ReLU) * 2"""
+
+    def __init__(self, in_channels, out_channels, mid_channels=None):
+        super().__init__()
+        if not mid_channels:
+            mid_channels = out_channels
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        return self.double_conv(x)
 
 
 def make_layers(cfg, in_channels=3, batch_norm=False, dilation=False):
@@ -101,17 +163,6 @@ def model_info(model, verbose=False, img_size=128):
     print(f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients{fs}")
 
 
-def initialize_weights(model):
-    for m in model.modules():
-        t = type(m)
-        if t is nn.Conv2d:
-            pass  # nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-        elif t is nn.BatchNorm2d:
-            m.eps = 1e-3
-            m.momentum = 0.03
-        elif t in [nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6]:
-            m.inplace = True
-
 
 class ComputeLoss:
     # Compute losses
@@ -123,41 +174,49 @@ class ComputeLoss:
         #self.MSELoss = nn.MSELoss(reduction='mean') 
         self.MSELoss = nn.MSELoss(reduction='sum')
         self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
+        self.HUBERLoss = nn.HuberLoss(reduction='sum', delta=1.35)
         self.in_size = in_size
 
-    def __call__(self, p0, p1, targets): 
+        self.up1 = nn.Upsample(scale_factor=2, mode='nearest')
+        self.up2 = nn.Upsample(scale_factor=2, mode='nearest')
+
+    def __call__(self, p0, p1, p2, targets): 
         device = targets.device
-        lloc = torch.zeros(1, device=device)
-        lcell = torch.zeros(1, device=device)
-        indices = self.build_targets(targets) 
+        
+        lcount_0 = torch.zeros(1, device=device)
+        lcount_1 = torch.zeros(1, device=device)
+        lcount_2 = torch.zeros(1, device=device)
+
+        indices_0, indices_1, indices_2 = self.build_targets(targets) 
+
+        tcount_0 = torch.zeros_like(p0, device=device)  
+        tcount_1 = torch.zeros_like(p1, device=device)   
+        tcount_2 = torch.zeros_like(p2, device=device)  
         
         # Losses
-        b, gj, gi = indices[0]  
-        tloc = torch.zeros_like(p0, device=device)  
-        tcell = torch.zeros_like(p1, device=device)   
-
+        b, gj, gi = indices_0[0]  
+ 
         n = b.shape[0]  
         if n:
-            #tobj[b, gi, gj] = 1 
+            
+            tcount_0[b, gi, gj] = 1 
 
-            nonempty, count = torch.unique(b, return_counts=True) 
+            b, gj, gi = indices_1[0]  
+            tcount_1[b, gi, gj] = 1 
 
-            for k, bi in enumerate(nonempty):
-                indx = torch.where(b==bi)
-                tloc[bi, gi[indx], gj[indx]] += 1
-                tcell[bi, 0] = float(count[k])
+            b, gj, gi = indices_2[0]  
+            tcount_2[b, gi, gj] = 1 
 
-        lloc += self.MSELoss(p0, tloc)
-        lcell += self.MSELoss(p1, tcell)
-        
-        #bs = tobj.shape[0]
-        
-        return  lloc + lcell, lloc.detach(), lcell.detach()
+        lcount_0 += self.MSELoss(p0, tcount_0)
+        lcount_1 += self.MSELoss(p1, tcount_1)
+        lcount_2 += self.MSELoss(p2, tcount_2)
+    
+        return  (lcount_0 + lcount_1 + lcount_2), lcount_0.detach(), lcount_1.detach(), lcount_2.detach()
 
 
     def build_targets(self, targets):
         # Build targets for compute_loss()
-        indices = []
+        indices_0 = []
 
         gain = torch.ones(5, device=targets.device)  # normalized to gridspace gain
         
@@ -167,11 +226,38 @@ class ComputeLoss:
         b = t[:, 0].long().T  
         gxy = t[:, 1:3]  # grid xy
 
+        gij = gxy.long()
+        gi, gj = gij.T  # grid xy indices
+
+        indices_0.append((b, gj, gi))  
+        
+        #####
+        indices_1 = []
+        gain[1:3] = torch.tensor((self.in_size//4, self.in_size//4)) #torch.tensor(p0.shape)[[2, 1]]  # xyxy gain
+        t = targets * gain
+
+        b = t[:, 0].long().T  
+        gxy = t[:, 1:3]  # grid xy
 
         gij = gxy.long()
         gi, gj = gij.T  # grid xy indices
 
-        indices.append((b, gj, gi))  
+        indices_1.append((b, gj, gi))  
+        #####
 
-        return indices
+        #####
+        indices_2 = []
+        gain[1:3] = torch.tensor((self.in_size//2, self.in_size//2)) #torch.tensor(p0.shape)[[2, 1]]  # xyxy gain
+        t = targets * gain
+
+        b = t[:, 0].long().T  
+        gxy = t[:, 1:3]  # grid xy
+
+        gij = gxy.long()
+        gi, gj = gij.T  # grid xy indices
+
+        indices_2.append((b, gj, gi))  
+        #####
+
+        return indices_0, indices_1, indices_2
 
