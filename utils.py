@@ -6,6 +6,7 @@ import shutil
 import cv2 
 import matplotlib.pyplot as plt
 from matplotlib import cm as CM
+<<<<<<< Updated upstream
 import os
 >>>>>>> Stashed changes
 
@@ -28,6 +29,18 @@ def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
 =======
         best_model_path = os.path.join(filename[0:-19],'model_best.pth.tar')
         print(best_model_path)
+=======
+import scipy
+from scipy.spatial import KDTree
+import os
+from scipy.ndimage.filters import gaussian_filter
+
+def save_checkpoint(state, is_best, filename='../checkpoint.pth.tar'):
+    torch.save(state, filename)
+    if is_best:
+        best_model_path = os.path.join(filename[0:-19],'model_best.pth.tar')
+        # print(best_model_path)
+>>>>>>> Stashed changes
         shutil.copyfile(filename, best_model_path) 
 
 

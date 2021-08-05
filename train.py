@@ -74,17 +74,25 @@ tb_writer = SummaryWriter(args.log_dir)
 gpu_time_writer = SummaryWriter(args.gpu_log_dir)
 =======
 # GENERAL
+<<<<<<< Updated upstream
 parser.add_argument('--model_desc', default='test/', help="Set model description")
 # parser.add_argument('--model_desc', default='test/', help="Set model description")
+=======
+parser.add_argument('--model_desc', default='sha_norm/', help="Set model description")
+>>>>>>> Stashed changes
 parser.add_argument('--train_json', default=os.path.join(path,'datasets/shanghai/part_A_train.json'), help='path to train json')
 parser.add_argument('--val_json', default=os.path.join(path,'datasets/shanghai/part_A_test.json'), help='path to test json')
 parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
+<<<<<<< Updated upstream
 parser.add_argument('--device', default='1', type=str, help='GPU id to use.')
+=======
+parser.add_argument('--device', default='6', type=str, help='GPU id to use.')
+>>>>>>> Stashed changes
 parser.add_argument('--checkpoint_path', default=os.path.join(path,'runs/weights'), type=str, help='checkpoint path')
 parser.add_argument('--log_dir', default=os.path.join(path,'runs/log'), type=str, help='log dir')
 parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
-parser.add_argument('--depth', default=False, type=bool, help='using depth?')
+parser.add_argument('--depth', default=True, type=bool, help='using depth?')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
@@ -186,7 +194,12 @@ def train(train_list, model, criterion, optimizer, epoch, GPU):
                     #    transform1=transforms.Compose([transforms.ToTensor(),]), 
                     #    transform2=transforms.Compose([transforms.ToTensor(),]), 
                        transform1=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
+<<<<<<< Updated upstream
                        transform2=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.502], std=[0.291]),]), 
+>>>>>>> Stashed changes
+=======
+                    #    transform2=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.502], std=[0.291]),]), 
+                       transform2=transforms.Compose([transforms.ToTensor(), transforms.ConvertImageDtype(torch.float),transforms.Normalize(mean=[19.6193], std=[855.685]),]), 
 >>>>>>> Stashed changes
                        train=True, 
                        seen=model.seen,
@@ -227,7 +240,7 @@ def train(train_list, model, criterion, optimizer, epoch, GPU):
         optimizer.step()    
 =======
 
-        imgs, targets = [], []
+        imgs, targets, imgs_depth = [], [], []
         length = args.cell_size
         b_num = 0
         
@@ -235,6 +248,7 @@ def train(train_list, model, criterion, optimizer, epoch, GPU):
             imgs, targets = [], []
             data_time.update(time.time() - end)
 
+<<<<<<< Updated upstream
             # ni = int(math.ceil(img_big.shape[2] / length)) 
             # nj = int(math.ceil(img_big.shape[3] / length))  
             k = 0 
@@ -274,6 +288,19 @@ def train(train_list, model, criterion, optimizer, epoch, GPU):
 
                     # print('y2 y1',y2,y1)
                     # print(y1)
+=======
+            ni = int(math.ceil(img_big.shape[2] / length)) 
+            nj = int(math.ceil(img_big.shape[3] / length))  
+            for i in range(ni):  
+                for j in range(nj):  
+                    y2 = min((i + 1) * length, img_big.shape[2])
+                    y1 = y2 - length
+                    x2 = min((j + 1) * length, img_big.shape[3])
+                    x1 = x2 - length
+                    # print('big', img_big_depth)
+                    # print(img_big_depth.dtype)
+                    # img_big_depth = img_big_depth/65535.0
+>>>>>>> Stashed changes
                     img_chip = img_big[:, :, y1:y2, x1:x2]
                     # if bi == 0:
                         # print('y1',y1)
@@ -296,16 +323,28 @@ def train(train_list, model, criterion, optimizer, epoch, GPU):
                         img_chip_depth  = zeropad(img_chip_depth.squeeze(0).permute(1,2,0).numpy(), l - img_chip_depth.shape[2], l - img_chip_depth.shape[3])
                         img_chip_depth = torch.from_numpy(img_chip_depth).unsqueeze(2)
                         img_chip_depth = img_chip_depth.permute(2,0,1).unsqueeze(0)
+<<<<<<< Updated upstream
                         assert img_chip_depth.shape[2] == img_chip_depth.shape[3] == l, 'image size error'
+=======
+                        assert img_chip_depth.shape[2] == img_chip_depth.shape[3] == length, 'image size error'
+                        # print(img_chip_depth[0])
+>>>>>>> Stashed changes
                     
                     target_chip = target_big[:, y1:y2, x1:x2]
                     target_chip = zeropad(target_chip.squeeze(0).numpy(), l - target_chip.shape[1], l - target_chip.shape[2], target=True)
                     target_chip = torch.from_numpy(target_chip).unsqueeze(0)
                     
+<<<<<<< Updated upstream
                     assert img_chip.shape[2] == img_chip.shape[3] == l, 'image size error'
                     assert target_chip.shape[1] == target_chip.shape[2] == l, 'target size error'
                     # print('target_chip', target_chip.shape)
                     # print(bi)
+=======
+                    assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
+                    assert img_chip_depth.shape[2] == img_chip_depth.shape[3] == length, ' depth image size error'
+                    assert target_chip.shape[1] == target_chip.shape[2] == length, 'target size error'
+            
+>>>>>>> Stashed changes
                     if args.vis:
                         vis_input(img_big.squeeze(0), target_big.squeeze(0), bi, path, 'big', args)
                         vis_input(img_chip.squeeze(0), target_chip.squeeze(0), bi, path, 'chip', args)
@@ -322,18 +361,30 @@ def train(train_list, model, criterion, optimizer, epoch, GPU):
                     # print('targets',targets)
 
                     if args.depth:
-                        img = torch.cat((img_chip ,img_chip_depth), dim=1)
+                        # img = torch.cat((img_chip ,img_chip_depth), dim=1)
+                        img = torch.clone(img_chip)
+                        img_depth = torch.clone(img_chip_depth)
                     else:
                         img = torch.clone(img_chip)
 
                     img = Variable(img)
                     imgs.append(img)
 
+                    img_depth = Variable(img_depth)
+                    imgs_depth.append(img_depth)
+
                     b_num += 1
 
                     #if b_num >= args.batch_size:
+<<<<<<< Updated upstream
                     if i == (nx-1):
+=======
+                    if i == (ni-1) and j == (nj-1):
+                        # print('imgs', imgs.shape)
+                        # print('imgs_depth', imgs_depth)
+>>>>>>> Stashed changes
                         imgs = torch.stack(imgs, dim=0).squeeze(1)
+                        imgs_depth = torch.stack(imgs_depth, dim=0).squeeze(1)
                         targets = [ti for ti in targets if len(ti) != 0]
                         if not targets:
                             print(b_num)
@@ -344,16 +395,28 @@ def train(train_list, model, criterion, optimizer, epoch, GPU):
                         # print('targets')
                         if CUDA:
                             imgs = imgs.cuda()
+<<<<<<< Updated upstream
                             # print('imgs',imgs.shape)
+=======
+                            imgs_depth = imgs_depth.cuda()
+>>>>>>> Stashed changes
                             targets = targets.cuda()
                             # print('tar',targets.shape)
                         
+<<<<<<< Updated upstream
                         if epoch <= 1:
                            tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
                         pred0 = model(imgs, training=True)  # forward
                         # print('pred',pred0.shape)
                         compute_loss = ComputeLoss(model, in_size=l)
                         loss, lcell = compute_loss(pred0, targets) 
+=======
+                        #if epoch <= 1:
+                        #    tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
+                        # print(imgs_depth.dtype)
+                        pred0, pred1, pred2, count = model(imgs, imgs_depth, training=True)  # forward
+                        loss, lcount_0, lcount_1, lcount_2 = compute_loss(pred0, pred1, pred2, targets, count) 
+>>>>>>> Stashed changes
 
                         losses.update(loss.item(), imgs.size(0))
                         losses_cell.update(lcell.item(), imgs.size(0))
@@ -373,16 +436,25 @@ def train(train_list, model, criterion, optimizer, epoch, GPU):
                         pbar.set_description(s)
 
                         imgs = []
+                        imgs_depth = []
                         targets = []
                         b_num = 0
                 high_end = y1
             # end batch ------------
 
+<<<<<<< Updated upstream
         pred_prob, _, _, val_losses = validate(args, val_list, val_list_depth, model, CUDA, compute_loss)
 
         is_best = pred_prob < args.best_pred
         args.best_pred = min(pred_prob, args.best_pred)
         print(' * Best MAE {mae:.3f} '.format(mae=args.best_pred))
+>>>>>>> Stashed changes
+=======
+        mae_count_0, mae_count_1, mae_count_2, mae_count, val_losses = validate(args, val_list, val_list_depth, model, CUDA, compute_loss)
+
+        is_best = mae_count < args.best_mae
+        args.best_mae = min(mae_count, args.best_mae)
+        print(' * Best MAE {mae:.3f} '.format(mae=args.best_mae))
 >>>>>>> Stashed changes
         
         batch_time.update(time.time() - end)
@@ -432,7 +504,11 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
                     # transform1=transforms.Compose([transforms.ToTensor(),]), 
                     # transform2=transforms.Compose([transforms.ToTensor(),]), 
                     transform1=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
+<<<<<<< Updated upstream
                     transform2=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.502], std=[0.291]),]), 
+=======
+                    transform2=transforms.Compose([transforms.ToTensor(), transforms.ConvertImageDtype(torch.float),transforms.Normalize(mean=[19.6193], std=[855.685]),]), 
+>>>>>>> Stashed changes
                     train=False), 
                     batch_size=1)    
 >>>>>>> Stashed changes
@@ -462,15 +538,31 @@ def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
 =======
     losses = AverageMeter()
+<<<<<<< Updated upstream
     mae_prob, mae_thresh = 0, 0
     mae_cell = 0
+=======
+    mae_count_0, mae_count_1, mae_count_2, mae_count = 0, 0, 0, 0
+>>>>>>> Stashed changes
     length = args.cell_size
-    imgs, targets = [], []
+    imgs, targets, imgs_depth = [], [], []
     b_num = 0
 
     with open(os.path.join(args.log_dir,'results.txt'), 'w') as f:
+<<<<<<< Updated upstream
         for bi, (img_big, target_big, img_big_depth) in pbar:  # batch ----------
             imgs, targets = [], []
+=======
+        for bi, (img_big, target_big, img_big_depth) in pbar:  
+            ni = int(math.ceil(img_big.shape[2] / length))  
+            nj = int(math.ceil(img_big.shape[3] / length)) 
+            for i in range(ni):  
+                for j in range(nj):  
+                    y2 = min((i + 1) * length, img_big.shape[2])
+                    y1 = y2 - length
+                    x2 = min((j + 1) * length, img_big.shape[3])
+                    x1 = x2 - length
+>>>>>>> Stashed changes
 
             # ni = int(math.ceil(img_big.shape[2] / length)) 
             # nj = int(math.ceil(img_big.shape[3] / length))  
@@ -527,6 +619,7 @@ def adjust_learning_rate(optimizer, epoch):
                     img_chip = torch.from_numpy(img_chip).permute(2,0,1).unsqueeze(0)
                     
                     if args.depth:
+                        img_big_depth = img_big_depth/65535.0
                         img_chip_depth = img_big_depth[:, :, y1:y2, x1:x2]
                         img_chip_depth = zeropad(img_chip_depth.squeeze(0).permute(1,2,0).numpy(), l - img_chip_depth.shape[2], l - img_chip_depth.shape[3])
                         img_chip_depth = torch.from_numpy(img_chip_depth).unsqueeze(2)
@@ -537,8 +630,14 @@ def adjust_learning_rate(optimizer, epoch):
                     target_chip = zeropad(target_chip.squeeze(0).numpy(), l - target_chip.shape[1], l - target_chip.shape[2], target=True)
                     target_chip = torch.from_numpy(target_chip).unsqueeze(0)
                     
+<<<<<<< Updated upstream
                     assert img_chip.shape[2] == img_chip.shape[3] == l, 'image size error'
                     assert target_chip.shape[1] == target_chip.shape[2] == l, 'target size error'
+=======
+                    assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
+                    assert img_chip_depth.shape[2] == img_chip_depth.shape[3] == length, ' depth image size error'
+                    assert target_chip.shape[1] == target_chip.shape[2] == length, 'target size error'
+>>>>>>> Stashed changes
 
                     coord = (target_chip.squeeze(0)).nonzero(as_tuple=False)
 
@@ -546,16 +645,19 @@ def adjust_learning_rate(optimizer, epoch):
                     targets.append(torch.tensor(bxy))
 
                     if args.depth:
-                        img = torch.cat((img_chip ,img_chip_depth), dim=1)
+                        img = torch.clone(img_chip)
+                        img_depth = torch.clone(img_chip_depth)
                     else:
                         img = torch.clone(img_chip)
 
                     imgs.append(img)
+                    imgs_depth.append(img_depth)
 
                     b_num += 1
 
                     if i == (nx-1):
                         imgs = torch.stack(imgs, dim=0).squeeze(1)
+                        imgs_depth = torch.stack(imgs_depth, dim=0).squeeze(1)
                         targets = [ti for ti in targets if len(ti) != 0]
                         if not targets:
                             targets.append(torch.tensor([[-1, 0, 0]]))
@@ -563,17 +665,25 @@ def adjust_learning_rate(optimizer, epoch):
 
                         if CUDA:
                             imgs = imgs.cuda()
+                            imgs_depth = imgs_depth.cuda()
                             targets = targets.cuda()
 
                         with torch.no_grad():
+<<<<<<< Updated upstream
                             predictions0 = model(imgs, training=False)
                             compute_loss = ComputeLoss(model, in_size=l)
                             loss, _ = compute_loss(predictions0, targets)  # loss scaled by batch_size
+=======
+                            # print('imgs',imgs.shape)
+                            predictions0, predictions1, predictions2, count_patches = model(imgs, imgs_depth, training=False)
+                            loss, _, _, _ = compute_loss(predictions0, predictions1, predictions2, targets, count_patches)  
+>>>>>>> Stashed changes
 
                             losses.update(loss.item(), imgs.size(0))
                             
                             #predictions0, predictions1 = predictions[..., 0], predictions[..., 1]
                             targets = targets.shape[0]
+<<<<<<< Updated upstream
                             #pred_prob, _ = predictions0.view(predictions0.size(0), -1).max(1, keepdim=True)
                             pred_prob = predictions0.sum()
                             #pred_prob = pred_prob.sum()
@@ -587,12 +697,31 @@ def adjust_learning_rate(optimizer, epoch):
                             s = '*Target {targets:.0f}\t *Pred {pred_prob:.4f}\t *Pred_Thresh {pred_thresh:.4f}\t *Pred_Cell {pred_cell:.4f}\t *MAE {mae_prob:.4f}\t *MAE_Thresh {mae_thresh:.4f}\t *MAE_Cell {mae_cell:.4f} \n'.\
                                 format(targets=targets, pred_prob=pred_prob, pred_thresh=0, pred_cell=0, \
                                     mae_prob=(pred_prob-targets), mae_thresh=(0), mae_cell=(0))
+=======
+                            pred_count_0 = predictions0.sum()
+                            pred_count_1 = predictions1.sum()
+                            pred_count_2 = predictions2.sum()
+                            count = count_patches.sum()
+
+                            mae_count_0 += abs(pred_count_0 - targets)
+                            mae_count_1 += abs(pred_count_1 - targets)
+                            mae_count_2 += abs(pred_count_2 - targets)
+                            # print('count',count.shape)
+                            # print('targets',targets.shape)
+                            mae_count += abs(count - targets)
+
+                            s = '*Target {targets:.0f}\t *Pred_0 {pred_0:.3f}\t *Pred_1 {pred_1:.3f}\t *Pred_2 {pred_2:.3f}\t *MAE_0 {mae_0:.3f}\t *MAE_1 {mae_1:.3f}\t *MAE_2 {mae_2:.3f}\n'.\
+                                format(targets=targets, pred_0=pred_count_0, pred_1=pred_count_1, pred_2=pred_count_2, \
+                                    mae_0=(pred_count_0-targets), mae_1=(pred_count_1-targets), mae_2=(pred_count_2-targets))
+>>>>>>> Stashed changes
                             
                             f.writelines(s)
 
                             imgs = []
+                            imgs_depth = []
                             targets = []
                             b_num = 0
+<<<<<<< Updated upstream
                 high_end = y1
     mae_prob = mae_prob/len(val_loader)
     mae_thresh = mae_thresh/len(val_loader)
@@ -603,6 +732,20 @@ def adjust_learning_rate(optimizer, epoch):
     #print(' * MAE_Cell {mae_cell:.3f} '.format(mae_cell=mae_cell))
 
     return mae_prob, mae_thresh, mae_cell, losses       
+=======
+        
+    mae_count_0 = mae_count_0/len(val_loader)
+    mae_count_1 = mae_count_1/len(val_loader)
+    mae_count_2 = mae_count_2/len(val_loader)
+    mae_count = mae_count/len(val_loader)
+
+    print(' * MAE_Count_0 {mae_0:.3f} '.format(mae_0=mae_count_0))
+    print(' * MAE_Count_1 {mae_1:.3f} '.format(mae_1=mae_count_1))
+    print(' * MAE_Count_2 {mae_2:.3f} '.format(mae_2=mae_count_2))
+    print(' * MAE_Count_T {mae_T:.3f} '.format(mae_T=mae_count))
+
+    return mae_count_0, mae_count_1, mae_count_2, mae_count, losses       
+>>>>>>> Stashed changes
 
 
 def main():
@@ -611,17 +754,23 @@ def main():
     args.best_pred = 1e6
 
     args.log_dir = os.path.join(args.log_dir,args.model_desc)
+<<<<<<< Updated upstream
     # files = glob.glob(os.path.normpath(os.path.join(args.log_dir,'*')))
     # for f in files:
     #     os.remove(f)
+=======
+>>>>>>> Stashed changes
     tb_writer = SummaryWriter(args.log_dir)
 
     args.checkpoint_path += ('/'+args.model_desc)
     if not pathlib.Path(args.checkpoint_path).exists():
         os.mkdir(args.checkpoint_path)
+<<<<<<< Updated upstream
     # files = glob.glob(os.path.normpath(os.path.join(args.checkpoint_path,'*')))
     # for f in files:
     #     os.remove(f)
+=======
+>>>>>>> Stashed changes
     args.checkpoint_path = os.path.join(args.checkpoint_path,'checkpoint.pth.tar')
 
     if args.exp == 'shanghai':
@@ -635,10 +784,10 @@ def main():
         val_list = [st.replace('/home/leeyh/Downloads/Shanghai', 'crowd_csr_grid/datasets/shanghai') for st in val_list_main]
 
         if args.depth:
-            train_list_depth = [st.replace('images', 'depth_resized_h5') for st in train_list]
-            val_list_depth = [st.replace('images', 'depth_resized_h5') for st in val_list]
-            train_list_depth = [st.replace('.jpg', '.h5') for st in train_list_depth]
-            val_list_depth = [st.replace('.jpg', '.h5') for st in val_list_depth]
+            train_list_depth = [st.replace('images', 'depth_boosted') for st in train_list]
+            val_list_depth = [st.replace('images', 'depth_boosted') for st in val_list]
+            # train_list_depth = [st.replace('.jpg', '.h5') for st in train_list_depth]
+            # val_list_depth = [st.replace('.jpg', '.h5') for st in val_list_depth]
         else:
             train_list_depth = None
             val_list_depth = None
