@@ -21,7 +21,7 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiB, 128, 7/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiB, 128, 7, trial2/', help="Set model description")
 parser.add_argument('--train_json', default=path/'datasets/shanghai/part_B_train.json', help='path to train json')
 parser.add_argument('--val_json', default=path/'datasets/shanghai/part_B_test.json', help='path to test json')
 parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
@@ -360,8 +360,8 @@ def main():
     if CUDA:
         model = model.cuda()
 
-    #optimizer = torch.optim.SGD(model.parameters(), args.lr0, momentum=args.momentum, weight_decay=args.weight_decay)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr0, betas=(args.momentum, 0.999))  # adjust beta1 to momentum
+    optimizer = torch.optim.SGD(model.parameters(), args.lr0, momentum=args.momentum, weight_decay=args.weight_decay)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=args.lr0, betas=(args.momentum, 0.999))  # adjust beta1 to momentum
     
     if args.use_pre:
         if os.path.isfile(args.checkpoint_path):

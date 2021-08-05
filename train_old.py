@@ -21,14 +21,14 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiB, 128, 7/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA, 128, 6/', help="Set model description")
 parser.add_argument('--train_json', default=path/'datasets/shanghai/part_B_train.json', help='path to train json')
 parser.add_argument('--val_json', default=path/'datasets/shanghai/part_B_test.json', help='path to test json')
 parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default=path.parent/'/drive/work_dirs/crowd_counting_shanghai_b', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default=path.parent/'/drive/work_dirs/crowd_counting_shanghai_b/logs', type=str, help='log dir')
+parser.add_argument('--log_dir', default=path.parent/'/drive/work_dirs/crowd_counting_shanghai_b/log', type=str, help='log dir')
 parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
 parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
@@ -43,7 +43,7 @@ parser.add_argument('--epochs', default=1000, type=int, help="Number of epochs t
 parser.add_argument('--workers', default=1, type=int, help="Number of workers in loading dataset")
 parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
-parser.add_argument('--lr0', default=0.0000001, type=float, help="initial learning rate")
+parser.add_argument('--lr0', default=0.000001, type=float, help="initial learning rate")
 parser.add_argument('--weight_decay', default=0.0005, type=float, help="weight_decay")
 parser.add_argument('--momentum', default=0.937, type=float, help="momentum")
 parser.add_argument('--adam', default=False, type=bool, help='use torch.optim.Adam() optimizer') 
@@ -191,7 +191,6 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
             'best_pred': args.best_mae,
             'optimizer' : optimizer.state_dict(),}, is_best, args.checkpoint_path)
         
-        
         tb_writer.add_scalar('train loss/total', losses.avg, epoch)
         tb_writer.add_scalar('train loss/count_0', losses_count_0.avg, epoch)
         tb_writer.add_scalar('train loss/count_1', losses_count_1.avg, epoch)
@@ -286,7 +285,6 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
 
                             losses.update(loss.item(), imgs.size(0))
                             
-                            predictions2 = predictions2[0]
                             targets = targets.shape[0]
                             pred_count_0 = predictions0.sum()
                             pred_count_1 = predictions1.sum()
@@ -374,10 +372,10 @@ def main():
             print("=> loaded checkpoint '{}' (epoch {})".format(args.checkpoint_path, checkpoint['epoch']))
         else:
             print("=> no checkpoint found at '{}'".format(args.checkpoint_path))
-    
+
+
     train(args, model, optimizer, train_list, val_list, train_list_depth, val_list_depth, tb_writer, CUDA) 
 
 
 if __name__ == '__main__':
     main() 
-

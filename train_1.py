@@ -21,7 +21,7 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiB, 128, 7/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiB, 256, 7, trial1/', help="Set model description")
 parser.add_argument('--train_json', default=path/'datasets/shanghai/part_B_train.json', help='path to train json')
 parser.add_argument('--val_json', default=path/'datasets/shanghai/part_B_test.json', help='path to test json')
 parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
@@ -34,7 +34,7 @@ parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
-parser.add_argument('--cell_size', default=128, type=int, help="cell size")
+parser.add_argument('--cell_size', default=256, type=int, help="cell size")
 parser.add_argument('--threshold', default=0.01, type=int, help="threshold for the classification output")
 
 # TRAINING

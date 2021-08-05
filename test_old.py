@@ -22,7 +22,7 @@ from utils import zeropad, vis_input
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='shanghaiA, 128, 7/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA, 128, 6/', help="Set model description")
 parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
 parser.add_argument('--exp_sets', default='part_A_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
@@ -42,8 +42,9 @@ parser.add_argument('--vis_image', default=True, type=bool, help='visualize the 
 parser.add_argument('--prob_map', default=False, type=bool, help='using threshold or probability map?') 
 
 
-def test():
 
+
+def test():
     args = parser.parse_args()
     args.log_dir += ('/'+args.model_desc)
     
@@ -74,13 +75,11 @@ def test():
     checkpoint = torch.load(args.checkpoint_path)
 
     model.load_state_dict(checkpoint['state_dict'])
-    model.eval()
 
     imgs, targets, target_chips = [], [], []
     length = args.cell_size
     b_num = 0
     sum_mae_count_0, sum_mse, sum_mae_count_1, sum_mae_count_2, sum_best = 0.0, 0.0, 0.0, 0.0, 0.0
-    one = 0
     dataset_length = len(img_paths)
     
     pbar = enumerate(img_paths)
@@ -164,7 +163,6 @@ def test():
 
                         with torch.no_grad():
                             predictions0, predictions1, predictions2 = model(imgs, training=False)
-                            predictions2 = predictions2[0]
 
                             img_name = img_path.replace('.jpg','').replace('/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset/' + args.exp_sets + '/images/','')
             
@@ -174,7 +172,7 @@ def test():
                             if args.vis_patch:
                                 p_i = imgs.size(0)//4
                                 vis_input(imgs[p_i, ...], target_chips[p_i, ...], predictions0[p_i, ...], pred1=predictions1[p_i, :, :], pred2=predictions2[p_i, :, :])
-                                                    
+                        
                             targets = targets.shape[0]
                             pred_count_0 = predictions0.sum()
                             pred_count_1 = predictions1.sum()
@@ -194,23 +192,15 @@ def test():
                             #sum_best += (abs(density - targets))
                             if mae_count_0 < mae_count_1 and mae_count_0 < mae_count_2:
                                 sum_best += mae_count_0
-                                #print('0 is the best', img_name)
                             elif mae_count_1 < mae_count_0 and mae_count_1 < mae_count_2:
                                 sum_best += mae_count_1
-                                one += 1
-                                #print(one, ' 1 is the best', img_name, 'target:', targets, 'mae 0:', mae_count_0.item(), 'mae 1:', mae_count_1.item())
                             elif mae_count_2 < mae_count_0 and mae_count_2 < mae_count_1:
                                 sum_best += mae_count_2
-                                #print('2 is the best', img_name)
-			    else:
-			        print('error')
-                            
 
                             #sum_best += mae_count_0 if mae_count_0 < mae_count_1 else mae_count_1
-                            
 
                             s = str((bi, 'MAE: ', mae_count_0.item(), 'Pred: ', pred_count_0.item(), 'target: ', targets))
-                            #pbar.set_description(s)
+                            pbar.set_description(s)
 
                             s = '*Target {targets:.0f}\t *Pred_0 {pred_0:.3f}\t *Pred_1 {pred_1:.3f}\t *Pred_2 {pred_2:.3f}\t *MAE_0 {mae_0:.3f}\t *MAE_1 {mae_1:.3f}\t *MAE_2 {mae_2:.3f} \n'.\
                                 format(targets=targets, pred_0=pred_count_0, pred_1=pred_count_1, pred_2=pred_count_2, \
@@ -231,15 +221,11 @@ def test():
 
 
 def vis_image(args, img_name, img_big, imgs, target_chips, ni, nj, predictions0, predictions1, predictions2=None, thresh=0.1):
-    
     import torch.nn as nn 
     import matplotlib.pyplot as plt
     import cv2 
 
     in_size = imgs.size(2)
-    if img_big.size(1) < in_size or img_big.size(2) < in_size:
-        return
-    
     out_size0 = predictions0.size(1) #
     out_size1 = predictions1.size(1) #
     out_size2 = predictions2.size(1) if predictions2 is not None else 0
@@ -273,8 +259,7 @@ def vis_image(args, img_name, img_big, imgs, target_chips, ni, nj, predictions0,
             pred_count_im0[y1:y2, x1:x2] = upsample0(predictions0[k, :, :].unsqueeze(0).unsqueeze(0))
             pred_count_im1[y1:y2, x1:x2] = upsample1(predictions1[k, :, :].unsqueeze(0).unsqueeze(0))
             if predictions2 is not None:
-                pred_count_im2[y1:y2, x1:x2] = predictions2[k, 2, :, :]
-                #pred_count_im2[y1:y2, x1:x2] = upsample2(predictions2[k, :, :].unsqueeze(0).unsqueeze(0))
+                pred_count_im2[y1:y2, x1:x2] = upsample2(predictions2[k, :, :].unsqueeze(0).unsqueeze(0))
 
     target = target_im.sum()
     img = img.permute(1, 2, 0).cpu()
@@ -334,5 +319,3 @@ def vis_image(args, img_name, img_big, imgs, target_chips, ni, nj, predictions0,
 
 if __name__ == '__main__':
     test()
-
-
