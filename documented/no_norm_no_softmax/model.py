@@ -18,7 +18,7 @@ class CSRNet(nn.Module):
 
         self.backend_feat = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512]
         self.frontend_feat  = [512, 512, 512, 256, 128, 64]
-        self.frontend_feat_depth  = [64, 'M', 128, 'M', 256]
+        self.frontend_feat_depth  = [64, 64, 'M', 128, 128, 'M', 256, 256]
         self.backend = make_layers(self.backend_feat, in_channels=3)
         self.frontend = make_layers(self.frontend_feat, in_channels=512, dilation=True)
         self.output_layer = nn.Conv2d(64, 1, kernel_size=1)
@@ -45,19 +45,13 @@ class CSRNet(nn.Module):
     def forward(self, x, x_depth, training=True):
         device = x.device
         x = self.backend(x)
-        # print('start',x_depth[0])
         x_depth  = self.frontend_depth(x_depth)
-        # print('after front end',x_depth[0])
         x_depth = nn.AvgPool2d((x_depth.shape[2], x_depth.shape[3]))(x_depth)
-        # print(x_depth.shape)
         x_depth  = nn.Flatten()(x_depth)
-        # print(x_depth.shape)
         x_depth = nn.Linear(256, 128, device=device)(x_depth)
-        # print(x_depth.shape)
-        x_depth = nn.Linear(128, 8, device=device)(x_depth)
+        x_depth = nn.Linear(128, 32, device=device)(x_depth)
+        x_depth = nn.Linear(32, 8, device=device)(x_depth)
         x_depth = nn.Linear(8, 3, device=device)(x_depth)
-        # print(x_depth)
-        x_depth = nn.Softmax()(x_depth)
         # print('x_depth', x_depth.shape)
         # print('x', x.shape)
         x0 = self.frontend(x)
@@ -75,7 +69,6 @@ class CSRNet(nn.Module):
         # print('x0', x0.shape)
         # print('x 0', x0.sum(dim = [1, 2]).shape)
         count = (x0.sum(dim = [1, 2]) * x_depth[:, 0]) + (x1.sum(dim = [1, 2]) * x_depth[:, 1]) + (x2.sum(dim = [1, 2]) * x_depth[:, 2])
-        # print(x_depth)
         # x = torch.stack([x0, x1, x2])
         # print('x', x.shape)
         '''# uncomment if binary loss is used

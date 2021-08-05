@@ -21,12 +21,12 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='sha_norm/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA_128_6/', help="Set model description")
 parser.add_argument('--train_json', default=os.path.join(path,'datasets/shanghai/part_A_train.json'), help='path to train json')
 parser.add_argument('--val_json', default=os.path.join(path,'datasets/shanghai/part_A_test.json'), help='path to test json')
 parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
-parser.add_argument('--device', default='6', type=str, help='GPU id to use.')
+parser.add_argument('--device', default='7', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default=os.path.join(path,'runs/weights'), type=str, help='checkpoint path')
 parser.add_argument('--log_dir', default=os.path.join(path,'runs/log'), type=str, help='log dir')
 parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
@@ -60,7 +60,7 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
                        depth=args.depth,
                        transform1=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
                     #    transform2=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.502], std=[0.291]),]), 
-                       transform2=transforms.Compose([transforms.ToTensor(), transforms.ConvertImageDtype(torch.float),transforms.Normalize(mean=[19.6193], std=[855.685]),]), 
+                       transform2=transforms.Compose([transforms.ToTensor()]), 
                        train=True, 
                        seen=0,
                        batch_size=1,
@@ -97,8 +97,7 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
                     x2 = min((j + 1) * length, img_big.shape[3])
                     x1 = x2 - length
                     # print('big', img_big_depth)
-                    # print(img_big_depth.dtype)
-                    # img_big_depth = img_big_depth/65535.0
+                    img_big_depth = img_big_depth/65535.0
                     img_chip = img_big[:, :, y1:y2, x1:x2]
                     img_chip = zeropad(img_chip.squeeze(0).permute(1,2,0).numpy(), length - img_chip.shape[2], length - img_chip.shape[3])
                     img_chip = torch.from_numpy(img_chip).permute(2,0,1).unsqueeze(0)
@@ -109,7 +108,6 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
                         img_chip_depth = torch.from_numpy(img_chip_depth).unsqueeze(2)
                         img_chip_depth = img_chip_depth.permute(2,0,1).unsqueeze(0)
                         assert img_chip_depth.shape[2] == img_chip_depth.shape[3] == length, 'image size error'
-                        # print(img_chip_depth[0])
                     
                     target_chip = target_big[:, y1:y2, x1:x2]
                     target_chip = zeropad(target_chip.squeeze(0).numpy(), length - target_chip.shape[1], length - target_chip.shape[2], target=True)
@@ -163,7 +161,7 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
                         
                         #if epoch <= 1:
                         #    tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
-                        # print(imgs_depth.dtype)
+
                         pred0, pred1, pred2, count = model(imgs, imgs_depth, training=True)  # forward
                         loss, lcount_0, lcount_1, lcount_2 = compute_loss(pred0, pred1, pred2, targets, count) 
 
@@ -225,7 +223,7 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
                     shuffle=False, 
                     depth=args.depth,
                     transform1=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
-                    transform2=transforms.Compose([transforms.ToTensor(), transforms.ConvertImageDtype(torch.float),transforms.Normalize(mean=[19.6193], std=[855.685]),]), 
+                    transform2=transforms.Compose([transforms.ToTensor(),]), 
                     train=False), 
                     batch_size=1)    
     
