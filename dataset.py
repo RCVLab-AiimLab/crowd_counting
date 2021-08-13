@@ -8,7 +8,7 @@ from PIL import Image
 import torchvision.transforms.functional as F
 
 class listDataset(Dataset):
-    def __init__(self, root, depthroot, shape=None, depth=False, shuffle=True, transform1=None, transform2=None, train=False, seen=0, batch_size=1, num_workers=4):
+    def __init__(self, root, depthroot, shape=None, density=False, depth=False, shuffle=True, transform1=None, transform2=None, train=False, seen=0, batch_size=1, num_workers=4):
         #if shuffle==True:
         if depth:
             main_root = list(zip(root, depthroot))
@@ -28,6 +28,7 @@ class listDataset(Dataset):
         self.seen = seen
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.density = density
         self.depth = depth
         
     def __len__(self):
@@ -43,7 +44,7 @@ class listDataset(Dataset):
             img_depth_path = None
 
         
-        img, target, img_depth = load_data(img_path, img_depth_path, self.train, depth=self.depth)
+        img, target, img_depth = load_data(img_path, img_depth_path, self.train, density=self.density, depth=self.depth)
         
         #img = 255.0 * F.to_tensor(img)
         
@@ -60,8 +61,12 @@ class listDataset(Dataset):
         return img, target, img_depth
 
 
-def load_data(img_path, depth_path=None, train=True, depth=False):
-    gt_path = img_path.replace('.jpg','_nofilter.h5').replace('images','ground_truth')
+def load_data(img_path, depth_path=None, train=True, density=False, depth=False):
+    if density:
+        gt_path = img_path.replace('.jpg','.h5').replace('images','ground_truth')
+    else:
+        gt_path = img_path.replace('.jpg','_nofilter.h5').replace('images','ground_truth')
+        
     img = Image.open(img_path).convert('RGB')
     gt_file = h5py.File(gt_path)
     target = np.asarray(gt_file['density'])

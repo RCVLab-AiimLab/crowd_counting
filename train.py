@@ -21,15 +21,16 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiA, 128, 6/', help="Set model description")
-parser.add_argument('--train_json', default=path/'datasets/shanghai/part_A_train.json', help='path to train json')
-parser.add_argument('--val_json', default=path/'datasets/shanghai/part_A_test.json', help='path to test json')
-parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
+parser.add_argument('--model_desc', default='shanghaiB, 128, 7/', help="Set model description")
+parser.add_argument('--train_json', default=path/'datasets/shanghai/part_B_train.json', help='path to train json')
+parser.add_argument('--val_json', default=path/'datasets/shanghai/part_B_test.json', help='path to test json')
+parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default=path.parent/'runs/weights', type=str, help='checkpoint path')
 parser.add_argument('--log_dir', default=path.parent/'runs/log', type=str, help='log dir')
 parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
+parser.add_argument('--density', default=False, type=bool, help='using density map instead of head locations?')
 parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
 # MODEL
@@ -43,7 +44,7 @@ parser.add_argument('--epochs', default=1000, type=int, help="Number of epochs t
 parser.add_argument('--workers', default=4, type=int, help="Number of workers in loading dataset")
 parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
-parser.add_argument('--lr0', default=0.000001, type=float, help="initial learning rate")
+parser.add_argument('--lr0', default=0.0000001, type=float, help="initial learning rate")
 parser.add_argument('--weight_decay', default=0.0005, type=float, help="weight_decay")
 parser.add_argument('--momentum', default=0.937, type=float, help="momentum")
 parser.add_argument('--adam', default=False, type=bool, help='use torch.optim.Adam() optimizer') 
@@ -51,12 +52,14 @@ parser.add_argument('--adam', default=False, type=bool, help='use torch.optim.Ad
 
 def train(args, model, optimizer, train_list, val_list, train_list_depth, val_list_depth, tb_writer, CUDA):
 
+    torch.manual_seed(0)
     compute_loss = ComputeLoss(model, in_size=args.cell_size)
 
     for epoch in range(args.start_epoch, args.epochs):
         train_loader = torch.utils.data.DataLoader(listDataset(train_list,
                        train_list_depth,
                        shuffle=True,
+                       density=args.density,
                        depth=args.depth,
                        transform1=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
                        transform2=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.502], std=[0.291]),]), 
@@ -120,10 +123,10 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
                         if args.depth:
                             vis_input(img_big_depth.squeeze(0), img_chip_depth.squeeze(0))
 
-                    coord = (target_chip.squeeze(0)).nonzero(as_tuple=False)
-
-                    bxy = [[b_num, yb/length, xb/length, i, j] for (yb, xb) in coord]
-                    targets.append(torch.tensor(bxy))
+                    if not args.density:
+                        coord = (target_chip.squeeze(0)).nonzero(as_tuple=False)
+                        bxy = [[b_num, yb/length, xb/length, i, j] for (yb, xb) in coord]
+                        targets.append(torch.tensor(bxy))
 
                     if args.depth:
                         img = torch.cat((img_chip ,img_chip_depth), dim=1)
@@ -133,15 +136,23 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
                     img = Variable(img)
                     imgs.append(img)
 
+                    if args.density:
+                        target_chip = target_chip.squeeze(0).numpy()
+                        target_chip = cv2.resize(target_chip,(target_chip.shape[1]//8,target_chip.shape[0]//8),interpolation = cv2.INTER_CUBIC)*64
+                        targets.append(torch.from_numpy(target_chip))
+
                     b_num += 1
 
                     #if b_num >= args.batch_size:
                     if i == (ni-1) and j == (nj-1):
                         imgs = torch.stack(imgs, dim=0).squeeze(1)
-                        targets = [ti for ti in targets if len(ti) != 0]
-                        if not targets:
-                            targets.append(torch.tensor([[-1, 0, 0, 0, 0]]))
-                        targets = torch.cat(targets)
+                        if not args.density:
+                            targets = [ti for ti in targets if len(ti) != 0]
+                            if not targets:
+                                targets.append(torch.tensor([[-1, 0, 0, 0, 0]]))
+                            targets = torch.cat(targets)
+                        else:
+                            targets = torch.stack(targets, dim=0)
 
                         if CUDA:
                             imgs = imgs.cuda()
@@ -191,14 +202,19 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
             'best_pred': args.best_mae,
             'optimizer' : optimizer.state_dict(),}, is_best, args.checkpoint_path)
         
+        
         tb_writer.add_scalar('train loss/total', losses.avg, epoch)
         tb_writer.add_scalar('train loss/count_0', losses_count_0.avg, epoch)
         tb_writer.add_scalar('train loss/count_1', losses_count_1.avg, epoch)
         tb_writer.add_scalar('train loss/count_2', losses_count_2.avg, epoch)
-        tb_writer.add_scalar('val loss/total', val_losses.avg, epoch)
+        tb_writer.add_scalar('val loss/total', val_losses[0].avg, epoch)
+        tb_writer.add_scalar('val loss/count_0', val_losses[1].avg, epoch)
+        tb_writer.add_scalar('val loss/count_1', val_losses[2].avg, epoch)
+        tb_writer.add_scalar('val loss/count_2', val_losses[3].avg, epoch)
         tb_writer.add_scalar('MAE/Count_0', mae_count_0, epoch)
         tb_writer.add_scalar('MAE/Count_1', mae_count_1, epoch)
-        tb_writer.add_scalar('MAE/Count_2', mae_count_2, epoch)
+        tb_writer.add_scalar('MAE/Count_2', mae_count_2[0], epoch)
+        tb_writer.add_scalar('MAE/Count_best', mae_count_2[1], epoch)
 
         # end epoch ------------
 
@@ -208,6 +224,7 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
     val_loader = torch.utils.data.DataLoader(listDataset(val_list, 
                     val_list_depth,
                     shuffle=False, 
+                    density=args.density,
                     depth=args.depth,
                     transform1=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
                     transform2=transforms.Compose([transforms.ToTensor(),]), 
@@ -220,7 +237,10 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
     pbar = tqdm(pbar, total=len(val_loader))  # progress bar
     
     losses = AverageMeter()
-    mae_count_0, mae_count_1, mae_count_2 = 0, 0, 0
+    losses_count_0 = AverageMeter()
+    losses_count_1 = AverageMeter()
+    losses_count_2 = AverageMeter()
+    sum_mae_count_0, sum_mae_count_1, sum_mae_count_2, sum_best = 0, 0, 0, 0
     length = args.cell_size
     imgs, targets = [], []
     b_num = 0
@@ -254,10 +274,10 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
                     assert img_chip.shape[2] == img_chip.shape[3] == length, 'image size error'
                     assert target_chip.shape[1] == target_chip.shape[2] == length, 'target size error'
 
-                    coord = (target_chip.squeeze(0)).nonzero(as_tuple=False)
-
-                    bxy = [[b_num, yb/length, xb/length, i, j] for (yb, xb) in coord]
-                    targets.append(torch.tensor(bxy))
+                    if not args.density:
+                        coord = (target_chip.squeeze(0)).nonzero(as_tuple=False)
+                        bxy = [[b_num, yb/length, xb/length, i, j] for (yb, xb) in coord]
+                        targets.append(torch.tensor(bxy))
 
                     if args.depth:
                         img = torch.cat((img_chip ,img_chip_depth), dim=1)
@@ -266,14 +286,22 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
 
                     imgs.append(img)
 
+                    if args.density:
+                        target_chip = target_chip.squeeze(0).numpy()
+                        target_chip = cv2.resize(target_chip,(target_chip.shape[1]//8,target_chip.shape[0]//8),interpolation = cv2.INTER_CUBIC)*64
+                        targets.append(torch.from_numpy(target_chip))
+
                     b_num += 1
 
                     if i == (ni-1) and j == (nj-1):
                         imgs = torch.stack(imgs, dim=0).squeeze(1)
-                        targets = [ti for ti in targets if len(ti) != 0]
-                        if not targets:
-                            targets.append(torch.tensor([[-1, 0, 0, 0, 0]]))
-                        targets = torch.cat(targets)
+                        if not args.density:
+                            targets = [ti for ti in targets if len(ti) != 0]
+                            if not targets:
+                                targets.append(torch.tensor([[-1, 0, 0, 0, 0]]))
+                            targets = torch.cat(targets)
+                        else:
+                            targets = torch.stack(targets, dim=0)
 
                         if CUDA:
                             imgs = imgs.cuda()
@@ -281,18 +309,31 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
 
                         with torch.no_grad():
                             predictions0, predictions1, predictions2 = model(imgs, training=False)
-                            loss, _, _, _ = compute_loss(predictions0, predictions1, predictions2, targets)  
+                            loss, lcount_0, lcount_1, lcount_2 = compute_loss(predictions0, predictions1, predictions2, targets)  
 
                             losses.update(loss.item(), imgs.size(0))
+                            losses_count_0.update(lcount_0.item(), imgs.size(0))
+                            losses_count_1.update(lcount_1.item(), imgs.size(0))
+                            losses_count_2.update(lcount_2.item(), imgs.size(0))
                             
-                            targets = targets.shape[0]
+                            if args.density:
+                                targets = targets.sum()
+                            else:
+                                targets = targets.shape[0]
+
                             pred_count_0 = predictions0.sum()
                             pred_count_1 = predictions1.sum()
                             pred_count_2 = predictions2.sum()
 
-                            mae_count_0 += abs(pred_count_0 - targets)
-                            mae_count_1 += abs(pred_count_1 - targets)
-                            mae_count_2 += abs(pred_count_2 - targets)
+                            mae_count_0 = abs(pred_count_0 - targets)
+                            mae_count_1 = abs(pred_count_1 - targets)
+                            mae_count_2 = abs(pred_count_2 - targets) 
+                            
+                            sum_mae_count_0 += mae_count_0
+                            sum_mae_count_1 += mae_count_1
+                            sum_mae_count_2 += mae_count_2
+
+                            sum_best += mae_count_0 if (mae_count_0 < mae_count_1) else mae_count_1
 
                             s = '*Target {targets:.0f}\t *Pred_0 {pred_0:.3f}\t *Pred_1 {pred_1:.3f}\t *Pred_2 {pred_2:.3f}\t *MAE_0 {mae_0:.3f}\t *MAE_1 {mae_1:.3f}\t *MAE_2 {mae_2:.3f} \n'.\
                                 format(targets=targets, pred_0=pred_count_0, pred_1=pred_count_1, pred_2=pred_count_2, \
@@ -304,15 +345,17 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
                             targets = []
                             b_num = 0
         
-    mae_count_0 = mae_count_0/len(val_loader)
-    mae_count_1 = mae_count_1/len(val_loader)
-    mae_count_2 = mae_count_2/len(val_loader)
+    mae_count_0 = sum_mae_count_0/len(val_loader)
+    mae_count_1 = sum_mae_count_1/len(val_loader)
+    mae_count_2 = sum_mae_count_2/len(val_loader)
+    mae_best = sum_best/len(val_loader)
 
     print(' * MAE_Count_0 {mae_0:.3f} '.format(mae_0=mae_count_0))
     print(' * MAE_Count_1 {mae_1:.3f} '.format(mae_1=mae_count_1))
     print(' * MAE_Count_2 {mae_2:.3f} '.format(mae_2=mae_count_2))
+    print(' * MAE_BestOfBoth {mae_best:.3f} '.format(mae_best=mae_best))
 
-    return mae_count_0, mae_count_1, mae_count_2, losses       
+    return mae_count_0, mae_count_1, [mae_count_2, mae_best], [losses, losses_count_0, losses_count_1, losses_count_2]
 
 
 def main():
@@ -358,8 +401,10 @@ def main():
     if CUDA:
         model = model.cuda()
 
-    #optimizer = torch.optim.SGD(model.parameters(), args.lr0, momentum=args.momentum, weight_decay=args.weight_decay)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr0, betas=(args.momentum, 0.999))  # adjust beta1 to momentum
+    if args.adam:
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr0, betas=(args.momentum, 0.999))  # adjust beta1 to momentum
+    else:
+        optimizer = torch.optim.SGD(model.parameters(), args.lr0, momentum=args.momentum, weight_decay=args.weight_decay)
     
     if args.use_pre:
         if os.path.isfile(args.checkpoint_path):
@@ -372,8 +417,7 @@ def main():
             print("=> loaded checkpoint '{}' (epoch {})".format(args.checkpoint_path, checkpoint['epoch']))
         else:
             print("=> no checkpoint found at '{}'".format(args.checkpoint_path))
-
-
+    
     train(args, model, optimizer, train_list, val_list, train_list_depth, val_list_depth, tb_writer, CUDA) 
 
 

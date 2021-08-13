@@ -8,7 +8,6 @@ import torch.nn as nn
 import cv2 
 from itertools import product, starmap
 from torchvision import models
-import segmentation_models_pytorch as smp 
 
 
 class CSRNet(nn.Module):
@@ -20,7 +19,7 @@ class CSRNet(nn.Module):
         self.frontend_feat  = [512, 512, 512, 256, 128, 64]
         self.backend = make_layers(self.backend_feat, in_channels=3)
         self.frontend = make_layers(self.frontend_feat, in_channels=512, dilation=True)
-        self.output_layer = nn.Conv2d(64, 1, kernel_size=1)
+        self.output_layer = nn.Conv2d(64, 2, kernel_size=1)
         
         if not load_weights:
             mod = models.vgg16(pretrained=True)
@@ -28,38 +27,38 @@ class CSRNet(nn.Module):
             for i in range(len(self.backend.state_dict().items())):
                 list(self.backend.state_dict().items())[i][1].data[:] = list(mod.state_dict().items())[i][1].data[:]
         
+        self.in_size = (in_size // 8)**2
         
         bilinear = False
         factor = 2 if bilinear else 1
         self.up1 = Up(512, 256 // factor, bilinear)
         self.up2 = Up(256, 128 // factor, bilinear)
-        self.outc1 = OutConv(256, 1)
-        self.outc2 = OutConv(128, 1)
         
+        self.out1 = OutConv(128, 1)
+
         self.info(verbose=verbose)
 
 
-    def forward(self, x, training=True):
-        x = self.backend(x)
+    def forward(self, x_im, training=True):
         
-        x0 = self.frontend(x)
-        x0 = self.output_layer(x0) 
-        x0 = x0.squeeze(1) # count_0
+        x = self.backend(x_im)
 
-        x = self.up1(x)
-        x1 = self.outc1(x)
-        x1 = x1.squeeze(1) # count_1
+        x01 = self.frontend(x)
+        x01 = self.output_layer(x01) 
 
-        x2 = self.up2(x) 
-        x2 = self.outc2(x2) 
-        x2 = x2.squeeze(1) # count_2
+        x0 = x01[:, 0, :, :]
+        x0 = x0.view(x0.size(0), -1).sum(1, keepdim=True)  # count 0
 
-        '''# uncomment if binary loss is used
+        x1 = x01[:, 1, :, :] # count 1
+
+        x2 = self.up1(x)
+        x2 = self.up2(x2) 
+        x2 = self.out1(x2) 
+        x2 = x2.squeeze(1) # localization
+        
         if not training: 
-            x0 = x0.sigmoid()
-            x1 = x1.sigmoid()
             x2 = x2.sigmoid()
-        '''    
+            
         return x0, x1, x2
 
 
@@ -163,7 +162,6 @@ def model_info(model, verbose=False, img_size=128):
     print(f"Model Summary: {len(list(model.modules()))} layers, {n_p} parameters, {n_g} gradients{fs}")
 
 
-
 class ComputeLoss:
     # Compute losses
     def __init__(self, model, autobalance=False, in_size=128):
@@ -174,52 +172,64 @@ class ComputeLoss:
         #self.MSELoss = nn.MSELoss(reduction='mean') 
         self.MSELoss = nn.MSELoss(reduction='sum')
         self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
-        self.HUBERLoss = nn.HuberLoss(reduction='sum', delta=1.35)
         self.in_size = in_size
 
-        self.up1 = nn.Upsample(scale_factor=2, mode='nearest')
-        self.up2 = nn.Upsample(scale_factor=2, mode='nearest')
+        self.up = nn.Upsample(scale_factor=4, mode='bilinear', align_corners=True)
 
     def __call__(self, p0, p1, p2, targets): 
         device = targets.device
         
+        # Losses
         lcount_0 = torch.zeros(1, device=device)
         lcount_1 = torch.zeros(1, device=device)
-        lcount_2 = torch.zeros(1, device=device)
-
-        indices_0, indices_1, indices_2 = self.build_targets(targets) 
-
-        tcount_0 = torch.zeros_like(p0, device=device)  
-        tcount_1 = torch.zeros_like(p1, device=device)   
-        tcount_2 = torch.zeros_like(p2, device=device)  
+        lloc = torch.zeros(1, device=device)
         
-        # Losses
-        b, gj, gi = indices_0[0]  
- 
+        tcount_0 = torch.zeros_like(p0, device=device)  
+        tcount_1 = torch.zeros_like(p1, device=device)  
+        tloc = torch.zeros_like(p2, device=device)   
+        
+        indices_count, indices_loc = self.build_targets(targets) 
+        
+        b, gj, gi = indices_loc[0]  
+        
         n = b.shape[0]  
         if n:
+            tloc[b, gi, gj] = 1 
+
+            indices_count = indices_count[0]
+            indices_count = torch.stack(indices_count)
+            nonempty, count = torch.unique(indices_count[0, :], dim=0, return_counts=True) 
+
+            for k in range(nonempty.size(0)):
+                indx = nonempty[k]
+                tcount_0[indx, :] = float(count[k])
             
-            tcount_0[b, gi, gj] = 1 
+            nonempty, count = torch.unique(indices_count, dim=1, return_counts=True) 
 
-            b, gj, gi = indices_1[0]  
-            tcount_1[b, gi, gj] = 1 
+            for k in range(nonempty.size(1)):
+                indx = nonempty[:, k]
+                tcount_1[indx[0], indx[2], indx[1]] = float(count[k])
+            
+        bs = n * self.in_size * 2
 
-            b, gj, gi = indices_2[0]  
-            tcount_2[b, gi, gj] = 1 
+        H0 = 1/self.in_size
+        H1 = 1/16
+        H2 = self.in_size
 
-        lcount_0 += self.MSELoss(p0, tcount_0)
-        lcount_1 += self.MSELoss(p1, tcount_1)
-        lcount_2 += self.MSELoss(p2, tcount_2)
-    
-        return  (lcount_0 + lcount_1 + lcount_2), lcount_0.detach(), lcount_1.detach(), lcount_2.detach()
+        lcount_0 += (self.MSELoss(p0, tcount_0) * H0) 
+        lcount_1 += (self.MSELoss(p1, tcount_1) * H1) 
+        lloc += (self.BCEobj(p2, tloc) * H2)
+        
+        return  (lcount_0 + lcount_1 + lloc), lcount_0.detach(), lcount_1.detach(), lloc.detach()
 
 
     def build_targets(self, targets):
         # Build targets for compute_loss()
-        indices_0 = []
-
+        
         gain = torch.ones(5, device=targets.device)  # normalized to gridspace gain
         
+        ##### count
+        indices_0 = []
         gain[1:3] = torch.tensor((self.in_size//8, self.in_size//8)) #torch.tensor(p0.shape)[[2, 1]]  # xyxy gain
         t = targets * gain
 
@@ -231,22 +241,8 @@ class ComputeLoss:
 
         indices_0.append((b, gj, gi))  
         
-        #####
+        ##### loc
         indices_1 = []
-        gain[1:3] = torch.tensor((self.in_size//4, self.in_size//4)) #torch.tensor(p0.shape)[[2, 1]]  # xyxy gain
-        t = targets * gain
-
-        b = t[:, 0].long().T  
-        gxy = t[:, 1:3]  # grid xy
-
-        gij = gxy.long()
-        gi, gj = gij.T  # grid xy indices
-
-        indices_1.append((b, gj, gi))  
-        #####
-
-        #####
-        indices_2 = []
         gain[1:3] = torch.tensor((self.in_size//2, self.in_size//2)) #torch.tensor(p0.shape)[[2, 1]]  # xyxy gain
         t = targets * gain
 
@@ -256,8 +252,7 @@ class ComputeLoss:
         gij = gxy.long()
         gi, gj = gij.T  # grid xy indices
 
-        indices_2.append((b, gj, gi))  
-        #####
+        indices_1.append((b, gj, gi))  
 
-        return indices_0, indices_1, indices_2
+        return indices_0, indices_1
 
