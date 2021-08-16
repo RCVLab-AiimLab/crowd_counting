@@ -74,8 +74,11 @@ def load_data(img_path, depth_path=None, train=True, density=False, depth=False)
     target = np.asarray(gt_file['density'])
     img_depth = torch.zeros(1)
     if depth:
-        h5 = h5py.File(depth_path,'r')
-        img_depth = h5['depth'][:]
-    
+        '''h5 = h5py.File(depth_path,'r')
+        img_depth = h5['depth'][:]'''
+        depth_path = depth_path.replace('depth_resized_h5', 'depth').replace('.h5', '.png')
+        img_depth = Image.open(depth_path)
+        img_depth = np.array(img_depth, dtype=float)
+
     return img, target, img_depth
     

@@ -31,10 +31,10 @@ class CSRNet(nn.Module):
         
         bilinear = False
         factor = 2 if bilinear else 1
-        self.up1 = Up(512, 256 // factor, bilinear)
-        self.up2 = Up(256, 128 // factor, bilinear)
+        self.up1 = Up(512, 256 // factor, bilinear, dilation=True)
+        self.up2 = Up(256, 128 // factor, bilinear, dilation=True)
         
-        self.up1_1 = Up(512, 256 // factor, bilinear)
+        self.up1_1 = Up(512, 256 // factor, bilinear, dilation=True)
         self.dconv2_1 = OutConv(256, 128)
         
         self.dconv1 = OutConv(1024, 256)
@@ -117,16 +117,21 @@ class CSRNet(nn.Module):
 class Up(nn.Module):
     """Upscaling then double conv"""
 
-    def __init__(self, in_channels, out_channels, bilinear=True):
+    def __init__(self, in_channels, out_channels, bilinear=True, dilation=False):
         super().__init__()
+
+        if dilation:
+            d_rate = 2
+        else:
+            d_rate = 1
 
         # if bilinear, use the normal convolutions to reduce the number of channels
         if bilinear:
             self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-            self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
+            self.conv = DoubleConv(in_channels, out_channels, in_channels // 2, d_rate)
         else:
             self.up = nn.ConvTranspose2d(in_channels , in_channels // 2, kernel_size=2, stride=2)
-            self.conv = DoubleConv(in_channels//2, out_channels)
+            self.conv = DoubleConv(in_channels//2, out_channels, d_rate)
 
 
     def forward(self, x1):
@@ -147,18 +152,18 @@ class OutConv(nn.Module):
 class DoubleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
-    def __init__(self, in_channels, out_channels, mid_channels=None):
+    def __init__(self, in_channels, out_channels, mid_channels=None, d_rate=1):
         super().__init__()
         if not mid_channels:
             mid_channels = out_channels
         self.double_conv = nn.Sequential(
-            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1),
+            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=d_rate, dilation=d_rate),
             # nn.BatchNorm2d(mid_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(mid_channels, mid_channels, kernel_size=3, padding=1),
+            nn.Conv2d(mid_channels, mid_channels, kernel_size=3, padding=d_rate, dilation=d_rate),
             # nn.BatchNorm2d(mid_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1),
+            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=d_rate, dilation=d_rate),
             # nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
@@ -255,11 +260,10 @@ class ComputeLoss:
                 tcount_1[b, indx[1], indx[0]] = float(count[k])
             
 
-
-        H0 = 1/100 
-        H1 = 1/100
-        H2 = 1/100
-        H3 = 1/(2*n)
+        H0 = 1/10 
+        H1 = 1/8 
+        H2 = 1/6 
+        H3 = 1/(10000)  
 
         lcount_0 += (self.MSELoss(p0, tcount_0) * H0) 
         lcount_1 += (self.MSELoss(p1, tcount_1) * H1) 
