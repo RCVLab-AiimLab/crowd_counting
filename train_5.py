@@ -24,11 +24,11 @@ parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 parser.add_argument('--model_desc', default='shanghaiB, 128, 7, trial5/', help="Set model description")
 parser.add_argument('--train_json', default=path/'datasets/shanghai/part_B_train.json', help='path to train json')
 parser.add_argument('--val_json', default=path/'datasets/shanghai/part_B_test.json', help='path to test json')
-parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
+parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', default=path.parent/'/drive/work_dirs/crowd_counting_shanghai_b', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default=path.parent/'/drive/work_dirs/crowd_counting_shanghai_b/logs', type=str, help='log dir')
+parser.add_argument('--checkpoint_path', default=path.parent/'/home/16amf8/data/work_dirs/crowd_counting_shanghai_b', type=str, help='checkpoint path')
+parser.add_argument('--log_dir', default=path.parent/'/home/16amf8/data/work_dirs/crowd_counting_shanghai_b/log', type=str, help='log dir')
 parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
 parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
@@ -336,8 +336,8 @@ def main():
         with open(args.val_json, 'r') as outfile:       
             val_list_main = json.load(outfile)
 
-        train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/drive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in train_list_main]
-        val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/drive/datasets/ShanghaiTech_Crowd_Counting_Dataset') for st in val_list_main]
+        train_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/home/16amf8/data/datasets/ShanghaiTech') for st in train_list_main]
+        val_list = [st.replace('/home/leeyh/Downloads/Shanghai', '/home/16amf8/data/datasets/ShanghaiTech') for st in val_list_main]
 
         if args.depth:
             train_list_depth = [st.replace('images', 'depth_resized_h5') for st in train_list]

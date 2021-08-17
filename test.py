@@ -22,13 +22,13 @@ from utils import zeropad, vis_input
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='shanghaiA, 128, 7/', help="Set model description")
-parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
+parser.add_argument('--model_desc', default='shanghaiA, 128, 7, trial14/', help="Set model description")
+parser.add_argument('--dataset_path', default='/home/16amf8/data/datasets/ShanghaiTech', help='path to dataset')
 parser.add_argument('--exp_sets', default='part_A_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', default='./runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default='./runs/log', type=str, help='log dir')
+parser.add_argument('--checkpoint_path', default='/home/16amf8/data/work_dirs/crowd_counting_shanghai_a', type=str, help='checkpoint path')
+parser.add_argument('--log_dir', default='/home/16amf8/data/work_dirs/crowd_counting_shanghai_a/log', type=str, help='log dir')
 parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
 # MODEL
@@ -36,7 +36,7 @@ parser.add_argument('--model_file', default=path/'model.yaml')
 parser.add_argument('--cell_size', default=128, type=int, help="cell size")
 parser.add_argument('--threshold', default=0.01, help="[0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.2, 0.3, 0.4, 0.5], threshold for the classification output")
 
-parser.add_argument('--best', default=False, type=bool, help='best or last saved checkpoint?') 
+parser.add_argument('--best', default=True, type=bool, help='best or last saved checkpoint?') 
 parser.add_argument('--vis_patch', default=False, type=bool, help='visualize the patches') 
 parser.add_argument('--vis_image', default=True, type=bool, help='visualize the whole image') 
 parser.add_argument('--prob_map', default=False, type=bool, help='using threshold or probability map?') 
@@ -166,7 +166,7 @@ def test():
                             predictions0, predictions1, predictions2 = model(imgs, training=False)
                             predictions2 = predictions2[0]
 
-                            img_name = img_path.replace('.jpg','').replace('/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset/' + args.exp_sets + '/images/','')
+                            img_name = img_path.replace('.jpg','').replace('/home/16amf8/data/datasets/ShanghaiTech/' + args.exp_sets + '/images/','')
             
                             if args.vis_image:
                                 vis_image(args, img_name, img_big, imgs, target_chips, ni, nj, predictions0, predictions1, predictions2, thresh=args.threshold)
@@ -194,16 +194,11 @@ def test():
                             #sum_best += (abs(density - targets))
                             if mae_count_0 < mae_count_1 and mae_count_0 < mae_count_2:
                                 sum_best += mae_count_0
-                                #print('0 is the best', img_name)
                             elif mae_count_1 < mae_count_0 and mae_count_1 < mae_count_2:
                                 sum_best += mae_count_1
                                 one += 1
-                                #print(one, ' 1 is the best', img_name, 'target:', targets, 'mae 0:', mae_count_0.item(), 'mae 1:', mae_count_1.item())
                             elif mae_count_2 < mae_count_0 and mae_count_2 < mae_count_1:
                                 sum_best += mae_count_2
-                                #print('2 is the best', img_name)
-			    else:
-			        print('error')
                             
 
                             #sum_best += mae_count_0 if mae_count_0 < mae_count_1 else mae_count_1
@@ -226,7 +221,10 @@ def test():
     print(' * MAE_Count_0 {mae_count_0:.3f} \n * MSE {mse:.3f} \n * MAE_Count_1 {mae_count_1:.3f} \n * MAE_Count_2 {mae_count_2:.3f} \n '.\
         format(mae_count_0=(sum_mae_count_0/dataset_length).item(), mse=(sum_mse/dataset_length).sqrt().item(), \
             mae_count_1=(sum_mae_count_1/dataset_length).item(), mae_count_2=(sum_mae_count_2/dataset_length).item()))
-    
+   
+    print(sum_best)
+    print(dataset_length)
+    print(sum_best/dataset_length)
     print(' * MAE_Best {mae_best:.3f}'.format(mae_best=(sum_best/dataset_length).item()))
 
 
