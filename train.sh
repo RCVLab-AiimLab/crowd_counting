@@ -4,4 +4,4 @@
 #SBATCH -n 1
 #SBATCH -o train.out
 
-python train_25.py
+python train_38.py
