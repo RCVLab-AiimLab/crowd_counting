@@ -10,7 +10,7 @@ import time
 import math
 from torchvision import transforms
 import json
-from model_final import CSRNet, ComputeLoss 
+from model import CSRNet, ComputeLoss 
 import torch 
 import torchvision.transforms.functional as F
 from torchvision import transforms
@@ -26,11 +26,11 @@ import matplotlib.pyplot as plt
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='shanghaiA, 1/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA/', help="Set model description")
 parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
 parser.add_argument('--exp_sets', default='part_A_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
-parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
+parser.add_argument('--device', default='1', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default='./runs/weights', type=str, help='checkpoint path')
 parser.add_argument('--log_dir', default='./runs/log', type=str, help='log dir')
 parser.add_argument('--density', default=False, type=bool, help='using density map instead of head locations?')
@@ -40,6 +40,7 @@ parser.add_argument('--depth', default=True, type=bool, help='using depth?')
 parser.add_argument('--model_file', default=path/'model.yaml')
 parser.add_argument('--cell_size', default=128, type=int, help="cell size")
 parser.add_argument('--threshold', default=0.3, help="[0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.2, 0.3, 0.4, 0.5], threshold for the classification output")
+parser.add_argument('--backend', default='vgg', type=str, help='vgg or resnet')
 
 parser.add_argument('--best', default=False, type=bool, help='best or last saved checkpoint?') 
 parser.add_argument('--vis_patch', default=False, type=bool, help='visualize the patches') 
@@ -71,7 +72,7 @@ def test():
     else:
         args.checkpoint_path += 'checkpoint.pth.tar'
 
-    model = CSRNet()
+    model = CSRNet(backend=args.backend)
 
     if CUDA:
         model = model.cuda()
@@ -81,13 +82,9 @@ def test():
     model.load_state_dict(checkpoint['state_dict'])
     model.eval()
 
-    compute_loss = ComputeLoss(model)
-
     imgs, imgs_depth, targets, target_bigs = [], [], [], []
-    b_num = 0
     sum_mae_count_0, sum_mse, sum_mae_count_1, sum_mae_count_2, sum_mae_total_count, sum_best = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     dataset_length = len(img_paths)
-    temp = 0
     
     pbar = enumerate(img_paths)
     pbar = tqdm(pbar, total=len(img_paths))
@@ -168,7 +165,7 @@ def test():
                 targets = targets.cuda()
 
             with torch.no_grad():
-                predictions0, predictions1, predictions2, total_count = model(imgs, imgs_depth, training=False)
+                predictions0, predictions1, predictions2, predictions3 = model(imgs, imgs_depth, training=False)
 
                 img_name = img_path.replace('.jpg','').replace('/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset/' + args.exp_sets + '/images/','')
 
@@ -177,7 +174,7 @@ def test():
                     vis_input(imgs[p_i, ...], target_bigs[p_i, ...], predictions0[p_i, ...], pred1=predictions1[p_i, :, :], pred2=predictions2[p_i, :, :])
                 
                 if args.vis_image:
-                    vis_image(args, img_name, img_big, imgs, target_bigs, predictions0, predictions1, predictions2, vis_loc=False)
+                    vis_image(args, img_name, img_big, imgs, target_bigs, predictions0, predictions1, predictions2=predictions2, predictions3= predictions3, vis_loc=False)
 
                 if args.vis_loc:
                     vis_image(args, img_name, img_big, imgs, target_bigs, predictions0, predictions1, predictions2, vis_loc=True)
@@ -190,7 +187,7 @@ def test():
                 pred_count_0 = (predictions0).sum()
                 pred_count_1 = (predictions1).sum()
                 pred_count_2 = (predictions2).sum()
-                total_count = total_count.sum()
+                total_count = predictions3.sum()
                 
                 mae_count_0 = abs(pred_count_0 - targets)
                 mae_count_1 = abs(pred_count_1 - targets)
@@ -202,16 +199,25 @@ def test():
                     temp += 1
                     #print(temp, targets, pred_count_0.item(), mae_count_0.item(), img_name)
                 '''
-
-                mse = (pred_count_0 - targets)**2
                 
                 sum_mae_count_0 += mae_count_0
-                sum_mse += mse
                 sum_mae_count_1 += mae_count_1
                 sum_mae_count_2 += mae_count_2
                 sum_mae_total_count += mae_count_T
+                
+                mse = (total_count - targets)**2
+                sum_mse += mse
 
-                sum_best += mae_count_0 if (mae_count_0 < mae_count_1) else mae_count_1
+                if mae_count_0 < mae_count_1 and mae_count_0 < mae_count_2:
+                    sum_best += mae_count_0
+                elif mae_count_1 < mae_count_0 and mae_count_1 < mae_count_2:
+                    sum_best += mae_count_1
+                elif mae_count_2 < mae_count_0 and mae_count_2 < mae_count_1:
+                    sum_best += mae_count_2
+                else:
+                    print('error')
+
+                #sum_best += mae_count_0 if (mae_count_0 < mae_count_1) else mae_count_1
 
                 s = str((bi, 'MAE: ', mae_count_0.item(), 'Pred: ', pred_count_0.item(), 'target: ', targets))
                 #pbar.set_description(s)
@@ -228,11 +234,11 @@ def test():
                 target_bigs = []
 
 
-    print(' * MAE_Count_0 {mae_count_0:.3f} \n * MSE {mse:.3f} \n * MAE_Count_1 {mae_count_1:.3f} \n * MAE_Count_2 {mae_count_2:.3f} \n * MAE_Count_total {mae_count_t:.3f} \n '.\
-        format(mae_count_0=(sum_mae_count_0/dataset_length).item(), mse=(sum_mse/dataset_length).sqrt().item(), \
-            mae_count_1=(sum_mae_count_1/dataset_length).item(), mae_count_2=(sum_mae_count_2/dataset_length).item(), mae_count_t=(sum_mae_total_count/dataset_length).item()))
+    print(' * MAE_Count_0 {mae_count_0:.3f} \n * MAE_Count_1 {mae_count_1:.3f} \n * MAE_Count_2 {mae_count_2:.3f} \n * MAE_Count_total {mae_count_t:.3f} \n  * MSE {mse:.3f} \n'.\
+        format(mae_count_0=(sum_mae_count_0/dataset_length).item(), \
+            mae_count_1=(sum_mae_count_1/dataset_length).item(), mae_count_2=(sum_mae_count_2/dataset_length).item(), mae_count_t=(sum_mae_total_count/dataset_length).item(), mse=(sum_mse/dataset_length).sqrt().item()))
     
-    print(' * MAE_Best {mae_best:.3f}'.format(mae_best=(sum_best/dataset_length).item()))
+    print(' * MAE_BestOf3 {mae_best:.3f}'.format(mae_best=(sum_best/dataset_length).item()))
 
 
 
@@ -280,7 +286,7 @@ def vis_locations(image, loc_im, gt):
     return num_blobs
 
 
-def vis_image(args, img_name, img_big, imgs, target_chips, predictions0, predictions1, predictions2=None, vis_loc=False):
+def vis_image(args, img_name, img_big, imgs, target_chips, predictions0, predictions1, predictions2=None, predictions3=None, vis_loc=False):
 
     in_size = imgs.size(2)
     if img_big.size(1) < in_size or img_big.size(2) < in_size:
@@ -289,18 +295,20 @@ def vis_image(args, img_name, img_big, imgs, target_chips, predictions0, predict
     out_size0 = predictions0.size(1) 
     out_size1 = predictions1.size(1) 
     out_size2 = predictions2.size(1) if predictions2 is not None else 0
+    out_size3 = predictions3.size(1) if predictions3 is not None else 0
 
     upsample0 = nn.Upsample(scale_factor=in_size//out_size0, mode='nearest')
     upsample1 = nn.Upsample(scale_factor=in_size//out_size1, mode='nearest')
     upsample2 = nn.Upsample(scale_factor=in_size//out_size2, mode='nearest') if predictions2 is not None else None
-    upsample3 = nn.Upsample(scale_factor=in_size, mode='nearest')
+    upsample3 = nn.Upsample(scale_factor=in_size//out_size3, mode='nearest') if predictions3 is not None else None
+    #upsample3 = nn.Upsample(scale_factor=in_size, mode='nearest')
     
     img = torch.zeros_like(img_big)
     pred_count_im0 = torch.zeros_like(img_big[0,:,:])
     pred_count_im1 = torch.zeros_like(img_big[0,:,:])
     pred_count_im2 = torch.zeros_like(img_big[0,:,:])
     target_im = torch.zeros_like(img_big[0,:,:])
-    target_count_im = torch.zeros_like(img_big[0,:,:])
+    #target_count_im = torch.zeros_like(img_big[0,:,:])
     
     if imgs.size(1) > 3:
         imgs = imgs[:, :3, :, :]
@@ -311,6 +319,9 @@ def vis_image(args, img_name, img_big, imgs, target_chips, predictions0, predict
     pred_count_im1 = upsample1(predictions1.unsqueeze(0)).squeeze(0).squeeze(0).cpu()
     if predictions2 is not None:
         pred_count_im2 = upsample2(predictions2.unsqueeze(0)).squeeze(0).squeeze(0).cpu()
+
+    if predictions3 is not None:
+        pred_count_im3 = upsample3(predictions3.unsqueeze(0)).squeeze(0).squeeze(0).cpu()
 
 
     target = target_im.sum()
@@ -339,20 +350,27 @@ def vis_image(args, img_name, img_big, imgs, target_chips, predictions0, predict
     #pred_count, _ = predictions0.view(predictions0.size(0), -1).sum(1, keepdim=True)
     #pred_count = pred_count.sum() 
     pred_count0 = predictions0.sum() 
-    plt.title('Pred: ' + str(pred_count0.round().item()) + '  MAE: ' + str((pred_count0-target).round().item()))
+    plt.title('P: ' + str(pred_count0.round().item()) + '  MAE: ' + str((pred_count0-target).round().item()))
     
     plt.subplot(2,3,5)
     plt.imshow(img)
     plt.imshow(pred_count_im1)#, alpha=0.9)
     pred_count1 = predictions1.sum()
-    plt.title('Pred: ' + str(pred_count1.round().item()) + '  MAE: ' + str((pred_count1-target).round().item()))
+    plt.title('P: ' + str(pred_count1.round().item()) + '  MAE: ' + str((pred_count1-target).round().item()))
 
     if predictions2 is not None:
         plt.subplot(2,3,6)
         plt.imshow(img)
         plt.imshow(pred_count_im2)#, alpha=0.9)
         pred_count2 = predictions2.sum()     
-        plt.title('Pred: ' + str(pred_count2.round().item()) + '  MAE: ' + str((pred_count2-target).round().item()))
+        plt.title('P: ' + str(pred_count2.round().item()) + '  MAE: ' + str((pred_count2-target).round().item()))
+
+    if predictions3 is not None:
+        plt.subplot(2,3,3)
+        plt.imshow(img)
+        plt.imshow(pred_count_im3)#, alpha=0.9)
+        pred_count3 = predictions3.sum()     
+        plt.title('P: ' + str(pred_count3.round().item()) + '  MAE: ' + str((pred_count3-target).round().item()))
 
     plt.show()
 
