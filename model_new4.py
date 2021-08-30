@@ -274,7 +274,9 @@ class CSRNet(nn.Module):
         self.up_fuse_0 = nn.Upsample(scale_factor=8, mode='bilinear', align_corners=True)
         self.up_fuse_1 = nn.Upsample(scale_factor=4, mode='bilinear', align_corners=True)
         self.up_fuse_2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-
+        self.adpool = nn.AdaptiveAvgPool2d((1,1))
+        self.lin1 = nn.Linear(64, 32)
+        self.lin2 = nn.Linear(32, 3)
         
         if backend == 'resnet':
             if not load_weights:
@@ -326,22 +328,30 @@ class CSRNet(nn.Module):
         x_att = nn.ReLU()(x_att)
         x_att = self.dconv2(x_att)
         x_att = nn.ReLU()(x_att)
-        x_att = self.dconv3(x_att)
-        
-        x_att = nn.Flatten()(x_att)
-        x_att = nn.Linear(x_att.shape[-1], 64, device=device)(x_att) 
+        # x_att = self.dconv3(x_att)
+
+        # print(x_att.shape)
+
+        x_att = self.adpool(x_att)
+        # print(x_att.shape)
+        # x_att = nn.Flatten()(x_att)
+        x_att = x_att.squeeze()
+        x_att = self.lin1(x_att)
         x_att = nn.ReLU()(x_att)
-        x_att = nn.Linear(x_att.shape[-1], 3, device=device)(x_att) 
+        x_att = self.lin2(x_att)
         x_att = nn.Softmax()(x_att)
+        # print(x_att.shape)
+        x_att = F.one_hot(torch.argmax(x_att, dim = 0), num_classes = 3)
+        # print(x_att.shape)
         ### 
 
         x00 = self.up_fuse_0(x0.unsqueeze(0))
         x11 = self.up_fuse_1(x1.unsqueeze(0))
         x22 = self.up_fuse_2(x2.unsqueeze(0))
-        # print(x00.shape)
-        # print(x11.shape)
-        # print(x22.shape)
+
         x_fuse = torch.cat([x00, x11, x22], dim=1)
+        # print(x_att.shape)
+        x_att = x_att.unsqueeze(0)
         # print(x_att.shape)
         x_att = x_att.unsqueeze(2)
         x_att = x_att.unsqueeze(3)
@@ -482,16 +492,16 @@ class ComputeLoss:
         device = targets.device
         print(ep)
         if eval:
-            if ep<5:
+            if ep<20:
                 H0 = 1 
                 H1, H2, H3 = 0, 0, 0
-            if ep>5 and ep<10:
+            if ep>20 and ep<40:
                 H0, H1 = 1, 1
                 H2, H3 = 0, 0
-            if ep>10 and ep<15:
+            if ep>40 and ep<60:
                 H0, H1, H2 = 1, 1, 1 
                 H3 = 0
-            if ep>15:
+            if ep>60:
                 H0, H1, H2, H3 = 1, 1, 1, 1
         else:
             H0, H1, H2, H3 = 1 , 1, 1, 1
