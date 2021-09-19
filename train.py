@@ -16,23 +16,22 @@ import math
 from utils import save_checkpoint, AverageMeter, vis_input, zeropad
 import cv2
 
-
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiA/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA', help="Set model description")
 parser.add_argument('--pre_model_desc', default='shanghaiA_pre/', help="Set model description")
 parser.add_argument('--train_json', default=path/'datasets/shanghai/part_A_train.json', help='path to train json')
 parser.add_argument('--val_json', default=path/'datasets/shanghai/part_A_test.json', help='path to test json')
-parser.add_argument('--use_pre', default=False, type=bool, help='use the pretrained model?')
+parser.add_argument('--use_pre', default=True, type=bool, help='use the pretrained model?')
 parser.add_argument('--use_gpu', default=True, action="store_false", help="Indicates whether or not to use GPU")
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default=path.parent/'runs/weights', type=str, help='checkpoint path')
 parser.add_argument('--log_dir', default=path.parent/'runs/log', type=str, help='log dir')
 parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
 parser.add_argument('--density', default=False, type=bool, help='using density map instead of head locations?')
-parser.add_argument('--depth', default=True, type=bool, help='using depth?')
+parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
@@ -42,27 +41,19 @@ parser.add_argument('--backend', default='vgg', type=str, help='vgg or resnet')
 
 # TRAINING
 parser.add_argument('--batch_size', default=512, type=int)
-parser.add_argument('--epochs', default=300, type=int, help="Number of epochs to train for")
+parser.add_argument('--epochs', default=1000, type=int, help="Number of epochs to train for")
 parser.add_argument('--workers', default=4, type=int, help="Number of workers in loading dataset")
 parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
-parser.add_argument('--lr0', default=0.00001, type=float, help="initial learning rate")
+parser.add_argument('--lr0', default=0.0000001, type=float, help="initial learning rate")
 parser.add_argument('--weight_decay', default=0.0005, type=float, help="weight_decay")
 parser.add_argument('--momentum', default=0.937, type=float, help="momentum")
 parser.add_argument('--adam', default=True, type=bool, help='use torch.optim.Adam() optimizer') 
-parser.add_argument('--dwa', default=True, type=bool, help='apply Dynamic Weight Average') 
-parser.add_argument('--temp', default=2.0, type=float, help='temperature for DWA (must be positive)') 
 
 
 def train(args, model, optimizer, train_list, val_list, train_list_depth, val_list_depth, tb_writer, CUDA):
 
     compute_loss = ComputeLoss(model)
-
-    ##########
-    T = args.temp
-    avg_cost = np.zeros([args.epochs, 16], dtype=np.float64)
-    lambda_weight = np.ones([4, args.epochs])
-    ##########
     
     for epoch in range(args.start_epoch, args.epochs):
 
@@ -82,6 +73,7 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
         losses_count_0 = AverageMeter()
         losses_count_1 = AverageMeter()
         losses_count_2 = AverageMeter()
+        losses_count_3 = AverageMeter()
         data_time = AverageMeter()
         batch_time = AverageMeter()
         end = time.time()
@@ -94,25 +86,6 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
         optimizer.zero_grad()
 
         imgs, targets, imgs_depth = [], [], []
-
-        #########
-        cost = np.zeros(16, dtype=np.float32)
-
-        if args.dwa:
-            index = np.copy(epoch)
-            if index == 0 or index == 1:
-                lambda_weight[:, index] = 1.0
-            else:
-                w_1 = avg_cost[index - 1, 0] / avg_cost[index - 2, 0]
-                w_2 = avg_cost[index - 1, 1] / avg_cost[index - 2, 1]
-                w_3 = avg_cost[index - 1, 2] / avg_cost[index - 2, 2]
-                w_4 = avg_cost[index - 1, 3] / avg_cost[index - 2, 3]
-                lambda_weight[0, index] = 4 * np.exp(w_1 / T) / (np.exp(w_1 / T) + np.exp(w_2 / T) + np.exp(w_3 / T) + np.exp(w_4 / T))
-                lambda_weight[1, index] = 4 * np.exp(w_2 / T) / (np.exp(w_1 / T) + np.exp(w_2 / T) + np.exp(w_3 / T) + np.exp(w_4 / T))
-                lambda_weight[2, index] = 4 * np.exp(w_3 / T) / (np.exp(w_1 / T) + np.exp(w_2 / T) + np.exp(w_3 / T) + np.exp(w_4 / T))
-                lambda_weight[3, index] = 4 * np.exp(w_4 / T) / (np.exp(w_1 / T) + np.exp(w_2 / T) + np.exp(w_3 / T) + np.exp(w_4 / T))
-
-        #########
         
         for bi, (img_big, target_big, img_big_depth) in pbar:  # batch ----------
             data_time.update(time.time() - end)
@@ -120,10 +93,11 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
             length_0 = img_big.size(2)
             length_1 = img_big.size(3)
 
-            img_big_d = torch.zeros_like(img_big)
-            img_big_d[:,0,:,:] = img_big_depth[:,0,:,:]
-            img_big_d[:,1,:,:] = img_big_depth[:,0,:,:]
-            img_big_d[:,2,:,:] = img_big_depth[:,0,:,:]
+            if args.depth:
+                img_big_d = torch.zeros_like(img_big)
+                img_big_d[:,0,:,:] = img_big_depth[:,0,:,:]
+                img_big_d[:,1,:,:] = img_big_depth[:,0,:,:]
+                img_big_d[:,2,:,:] = img_big_depth[:,0,:,:]
             
             if args.vis:
                 vis_input(img_big.squeeze(0), target_big.squeeze(0))
@@ -154,7 +128,8 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
                 targets.append(torch.from_numpy(target_big))
 
             imgs = torch.stack(imgs, dim=0).squeeze(1)
-            imgs_depth = torch.stack(imgs_depth, dim=0).squeeze(1)
+            if args.depth:
+                imgs_depth = torch.stack(imgs_depth, dim=0).squeeze(1)
             if not args.density:
                 targets = [ti for ti in targets if len(ti) != 0]
                 if not targets:
@@ -165,54 +140,29 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
 
             if CUDA:
                 imgs = imgs.cuda()
-                imgs_depth = imgs_depth.cuda()
                 targets = targets.cuda()
+                if args.depth:
+                    imgs_depth = imgs_depth.cuda()
             
-            #if epoch <= 1:
-            #    tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
+            '''if epoch <= 1:
+                tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])'''
 
-            pred0, pred1, pred2, pred3 = model(imgs, imgs_depth, training=True)  # forward
-            train_loss, lcount_0, lcount_1, lcount_2 = compute_loss(pred0, pred1, pred2, pred3, targets) 
-
-            #####  
-            if args.dwa:
-                loss = sum([lambda_weight[i, index] * train_loss[i] for i in range(len(train_loss))])
+            if args.depth:
+                pred0, pred1, pred2, pred3 = model(imgs, imgs_depth, training=True)  # forward
             else:
-                logsigma = nn.Parameter(torch.FloatTensor([-0.5, -0.5, -0.5]))
-                loss = sum(1 / (2 * torch.exp(logsigma[i])) * train_loss[i] + logsigma[i] / 2 for i in range(len(train_loss)))
-            
-            cost[0] = train_loss[0].item()
-            cost[1] = train_loss[1].item()
-            cost[2] = train_loss[2].item()
-            cost[3] = train_loss[3].item()
-            
-            if args.density:
-                targets = targets.sum()
-            else:
-                targets = targets.shape[0]
+                pred0, pred1, pred2, pred3 = model(imgs, training=True)  # forward
+            train_loss, lcount_0, lcount_1, lcount_2, lcount_3 = compute_loss(pred0, pred1, pred2, pred3, targets) 
+            pred3 = pred3[0]
 
-            pred_count_0 = pred0.sum()
-            pred_count_1 = pred1.sum()
-            pred_count_2 = pred2.sum()
-            pred_count_3 = pred3.sum()
-
-            mae_count_0 = abs(pred_count_0 - targets)
-            mae_count_1 = abs(pred_count_1 - targets)
-            mae_count_2 = abs(pred_count_2 - targets) 
-            mae_count_3 = abs(pred_count_3 - targets)
-
-            cost[4] = mae_count_0.item()
-            cost[5] = mae_count_1.item()
-            cost[6] = mae_count_2.item()
-            cost[7] = mae_count_3.item()
-
-            avg_cost[index, :8] += cost[:8] / len(train_loader)
-            #####  
+            #logsigma = nn.Parameter(torch.FloatTensor([-0.25, -0.25, -0.25, -0.25]))
+            #loss = sum(1 / (2 * torch.exp(logsigma[i])) * train_loss[i] + logsigma[i] / 2 for i in range(len(train_loss)))
+            loss = sum(train_loss[i] for i in range(len(train_loss)))
             
             losses.update(loss.item(), imgs.size(0))
             losses_count_0.update(lcount_0.item(), imgs.size(0))
             losses_count_1.update(lcount_1.item(), imgs.size(0))
             losses_count_2.update(lcount_2.item(), imgs.size(0))
+            losses_count_3.update(lcount_3.item(), imgs.size(0))
             
             optimizer.zero_grad()
             loss.backward()
@@ -234,7 +184,7 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
 
             # end batch ------------
 
-        mae_count_0, mae_count_1, mae_count_2, mae_count_3, mae_best, val_losses = validate(args, val_list, val_list_depth, model, CUDA, compute_loss, cost, avg_cost, index)
+        mae_count_0, mae_count_1, mae_count_2, mae_count_3, mae_best, val_losses = validate(args, val_list, val_list_depth, model, CUDA, compute_loss)
 
         is_best = mae_count_3 < args.best_mae
         args.best_mae = min(mae_count_3, args.best_mae)
@@ -254,10 +204,12 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
         tb_writer.add_scalar('train loss/count_0', losses_count_0.avg, epoch)
         tb_writer.add_scalar('train loss/count_1', losses_count_1.avg, epoch)
         tb_writer.add_scalar('train loss/count_2', losses_count_2.avg, epoch)
+        tb_writer.add_scalar('train loss/count_3', losses_count_3.avg, epoch)
         tb_writer.add_scalar('val loss/total', val_losses[0].avg, epoch)
         tb_writer.add_scalar('val loss/count_0', val_losses[1].avg, epoch)
         tb_writer.add_scalar('val loss/count_1', val_losses[2].avg, epoch)
         tb_writer.add_scalar('val loss/count_2', val_losses[3].avg, epoch)
+        tb_writer.add_scalar('val loss/count_3', val_losses[4].avg, epoch)
         tb_writer.add_scalar('MAE/Count_0', mae_count_0, epoch)
         tb_writer.add_scalar('MAE/Count_1', mae_count_1, epoch)
         tb_writer.add_scalar('MAE/Count_2', mae_count_2, epoch)
@@ -267,7 +219,7 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
         # end epoch ------------
 
 
-def validate(args, val_list, val_list_depth, model, CUDA, compute_loss, cost, avg_cost, index):
+def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
     print ('begin validation')
     val_loader = torch.utils.data.DataLoader(listDataset(val_list, 
                     val_list_depth,
@@ -288,6 +240,7 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss, cost, av
     losses_count_0 = AverageMeter()
     losses_count_1 = AverageMeter()
     losses_count_2 = AverageMeter()
+    losses_count_3 = AverageMeter()
     sum_mae_count_0, sum_mae_count_1, sum_mae_count_2, sum_mae_total_count, sum_best = 0, 0, 0, 0, 0
     imgs, targets, imgs_depth = [], [], []
     b_num = 0
@@ -298,11 +251,12 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss, cost, av
             length_0 = img_big.size(2)
             length_1 = img_big.size(3)
 
-            img_big_d = torch.zeros_like(img_big)
-            img_big_depth = img_big_depth/65535.0
-            img_big_d[:,0,:,:] = img_big_depth[:,0,:,:]
-            img_big_d[:,1,:,:] = img_big_depth[:,0,:,:]
-            img_big_d[:,2,:,:] = img_big_depth[:,0,:,:]
+            if args.depth:
+                img_big_d = torch.zeros_like(img_big)
+                img_big_depth = img_big_depth/65535.0
+                img_big_d[:,0,:,:] = img_big_depth[:,0,:,:]
+                img_big_d[:,1,:,:] = img_big_depth[:,0,:,:]
+                img_big_d[:,2,:,:] = img_big_depth[:,0,:,:]
 
             if not args.density:
                 coord = (target_big.squeeze(0)).nonzero(as_tuple=False)
@@ -325,7 +279,8 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss, cost, av
                 targets.append(torch.from_numpy(target_big))
 
             imgs = torch.stack(imgs, dim=0).squeeze(1)
-            imgs_depth = torch.stack(imgs_depth, dim=0).squeeze(1)
+            if args.depth:
+                imgs_depth = torch.stack(imgs_depth, dim=0).squeeze(1)
             if not args.density:
                 targets = [ti for ti in targets if len(ti) != 0]
                 if not targets:
@@ -336,18 +291,24 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss, cost, av
 
             if CUDA:
                 imgs = imgs.cuda()
-                imgs_depth = imgs_depth.cuda()
                 targets = targets.cuda()
+            if args.depth:
+                imgs_depth = imgs_depth.cuda()
 
             with torch.no_grad():
-                predictions0, predictions1, predictions2, predictions3 = model(imgs, imgs_depth, training=False)
-                val_loss, lcount_0, lcount_1, lcount_2 = compute_loss(predictions0, predictions1, predictions2, predictions3, targets)  
+                if args.depth:
+                    predictions0, predictions1, predictions2, predictions3 = model(imgs, imgs_depth, training=False)
+                else:
+                    predictions0, predictions1, predictions2, predictions3 = model(imgs, training=False)
+                val_loss, lcount_0, lcount_1, lcount_2, lcount_3 = compute_loss(predictions0, predictions1, predictions2, predictions3, targets)  
+                predictions3 = predictions3[0]
 
                 
                 losses.update(val_loss[0].item(), imgs.size(0))
                 losses_count_0.update(lcount_0.item(), imgs.size(0))
                 losses_count_1.update(lcount_1.item(), imgs.size(0))
                 losses_count_2.update(lcount_2.item(), imgs.size(0))
+                losses_count_3.update(lcount_3.item(), imgs.size(0))
                 
                 if args.density:
                     targets = targets.sum()
@@ -364,19 +325,6 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss, cost, av
                 mae_count_1 = abs(pred_count_1 - targets)
                 mae_count_2 = abs(pred_count_2 - targets) 
                 mae_count_3 = abs(pred_count_3 - targets)
-
-                #####
-                cost[8] = val_loss[0].item()
-                cost[9] = val_loss[1].item()
-                cost[10] = val_loss[2].item()
-                cost[11] = val_loss[3].item()
-                
-                cost[12] = mae_count_0.item()
-                cost[13] = mae_count_1.item()
-                cost[14] = mae_count_2.item()
-                cost[15] = mae_count_3.item()
-                avg_cost[index, 8:] += cost[8:] / len(val_loader)
-                #####
                 
                 sum_mae_count_0 += mae_count_0
                 sum_mae_count_1 += mae_count_1
@@ -415,18 +363,13 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss, cost, av
     print(' * MAE_Count_2 {mae_2:.3f} '.format(mae_2=mae_count_2))
     print(' * MAE_Count_3 {mae_T:.3f} '.format(mae_T=mae_count_3))
     print(' * MAE_BestOf3 {mae_best:.3f} '.format(mae_best=mae_best))
-    print(' * * * COSTS (to adjust weights in multitasking loss)')
-    print(' Epoch: {:04d} | TRAIN: {:.3f} {:.3f} {:.3f} {:.3f} || {:.3f} {:.3f} {:.3f} {:.3f} \n'
-            '                TEST: {:.3f} {:.3f} {:.3f} {:.3f} || {:.3f} {:.3f} {:.3f} {:.3f} '
-            .format(index, avg_cost[index, 0], avg_cost[index, 1], avg_cost[index, 2], avg_cost[index, 3],
-                    avg_cost[index, 4], avg_cost[index, 5], avg_cost[index, 6], avg_cost[index, 7], avg_cost[index, 8],
-                    avg_cost[index, 9], avg_cost[index, 10], avg_cost[index, 11], avg_cost[index, 12], avg_cost[index, 13],
-                    avg_cost[index, 14], avg_cost[index, 15]))
 
-    return mae_count_0, mae_count_1, mae_count_2, mae_count_3, mae_best, [losses, losses_count_0, losses_count_1, losses_count_2]
+    return mae_count_0, mae_count_1, mae_count_2, mae_count_3, mae_best, [losses, losses_count_0, losses_count_1, losses_count_2, losses_count_3]
 
 
 def main():
+    torch.manual_seed(0)
+    
     args = parser.parse_args()
 
     args.best_mae = 1e6

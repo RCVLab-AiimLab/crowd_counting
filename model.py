@@ -14,7 +14,7 @@ import cv2
 from itertools import product, starmap
 from torchvision import models
 import torch.nn.functional as F
-
+import matplotlib.pyplot as plt
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152', 'resnext50_32x4d', 'resnext101_32x8d',
@@ -239,43 +239,35 @@ class CSRNet(nn.Module):
 
         if backend == 'resnet':
             self.backend = _resnet('wide_resnet101_2', Bottleneck, [3, 4, 6, 3], pretrained=False, progress=True)
-            self.backend_att = _resnet('wide_resnet101_2', Bottleneck, [3, 4, 6, 3], pretrained=False, progress=True)
-            self.backend_fuse = _resnet('wide_resnet101_2', Bottleneck, [3, 4, 6, 3], pretrained=False, progress=True)
         elif backend == 'vgg':
             self.backend_feat = [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512]
+            self.backend_feat_1 = [64, 64, 'M', 128, 128, 'M', 256, 256, 256]
+            self.backend_feat_2 = [64, 64, 'M', 128, 128]
             self.backend = make_layers(self.backend_feat, in_channels=3)
-            self.backend_att = make_layers(self.backend_feat, in_channels=3)
-            self.backend_fuse = make_layers(self.backend_feat, in_channels=3)
-            
+            self.backend_1 = make_layers(self.backend_feat_1, in_channels=3)
+            self.backend_2 = make_layers(self.backend_feat_2, in_channels=3)    
         
         self.frontend_feat  = [512, 512, 512, 256, 128, 64]
+        self.frontend_feat_1  = [256, 128, 64]
+        self.frontend_feat_2  = [128, 64]
         self.frontend = make_layers(self.frontend_feat, in_channels=512, dilation=True)
-        self.frontend_fuse = make_layers(self.frontend_feat, in_channels=512, dilation=True)
-        
-        self.output_layer_0 = nn.Conv2d(64, 1, kernel_size=1)
-        self.output_layer_fuse = nn.Conv2d(64, 1, kernel_size=1)
-        
-        bilinear = False
-        factor = 2 if bilinear else 1
-        self.up0 = Up(512, 256 // factor, bilinear, dilation=True)
-        
-        self.up1 = Up(512, 256 // factor, bilinear, dilation=True)
-        self.up2 = Up(256, 128 // factor, bilinear, dilation=True)
-        
-        self.dconv0 = OutConv(256, 128)
-        
-        self.dconv1 = OutConv(512, 256)
-        self.dconv2 = OutConv(256, 64)
-        self.dconv3 = OutConv(64, 1)
+        self.frontend_1 = make_layers(self.frontend_feat_1, in_channels=256, dilation=True)
+        self.frontend_2 = make_layers(self.frontend_feat_2, in_channels=128, dilation=True)
 
-        self.output_layer_1 = OutConv(128, 1)
-        self.output_layer_2 = OutConv(128, 1)
-
-        self.up_fuse_0 = nn.Upsample(scale_factor=8, mode='bilinear', align_corners=True)
-        self.up_fuse_1 = nn.Upsample(scale_factor=4, mode='bilinear', align_corners=True)
-        self.up_fuse_2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-
+        self.output_layer_0 = OutConv(64, 1)
+        self.output_layer_1 = OutConv(64, 1)
+        self.output_layer_2 = OutConv(64, 1)
+        self.output_layer_3 = OutConv(192, 1)
         
+        self.down_fuse_2 = nn.Sequential(nn.Conv2d(64, 64, kernel_size=2, stride=2), nn.LeakyReLU(inplace=True),
+                                        nn.Conv2d(64, 64, kernel_size=2, stride=2), nn.LeakyReLU(inplace=True),
+                                        nn.Conv2d(64, 64, kernel_size=2, stride=2), nn.LeakyReLU(inplace=True),)
+
+        self.down_fuse_1 = nn.Sequential(nn.Conv2d(64, 64, kernel_size=2, stride=2), nn.LeakyReLU(inplace=True),
+                                        nn.Conv2d(64, 64, kernel_size=2, stride=2), nn.LeakyReLU(inplace=True),)
+
+        self.down_fuse_0 = nn.Sequential(nn.Conv2d(64, 64, kernel_size=2, stride=2), nn.LeakyReLU(inplace=True),)
+
         if backend == 'resnet':
             if not load_weights:
                 mod = models.wide_resnet50_2(pretrained=True)
@@ -284,8 +276,6 @@ class CSRNet(nn.Module):
                     temp = list(self.backend.state_dict().items())[i]
                     if len(temp[1].size()) > 0:
                         list(self.backend.state_dict().items())[i][1].data[:] = list(mod.state_dict().items())[i][1].data[:]
-                        list(self.backend_att.state_dict().items())[i][1].data[:] = list(mod.state_dict().items())[i][1].data[:]
-                        list(self.backend_fuse.state_dict().items())[i][1].data[:] = list(mod.state_dict().items())[i][1].data[:]
         
         elif backend == 'vgg':
             if not load_weights:
@@ -293,9 +283,12 @@ class CSRNet(nn.Module):
                 self._initialize_weights()
                 for i in range(len(self.backend.state_dict().items())):
                     list(self.backend.state_dict().items())[i][1].data[:] = list(mod.state_dict().items())[i][1].data[:]
-                    list(self.backend_att.state_dict().items())[i][1].data[:] = list(mod.state_dict().items())[i][1].data[:]
-                    list(self.backend_fuse.state_dict().items())[i][1].data[:] = list(mod.state_dict().items())[i][1].data[:]
-        
+                for i in range(len(self.backend_1.state_dict().items())):
+                    list(self.backend_1.state_dict().items())[i][1].data[:] = list(mod.state_dict().items())[i][1].data[:]
+                for i in range(len(self.backend_2.state_dict().items())):
+                    list(self.backend_2.state_dict().items())[i][1].data[:] = list(mod.state_dict().items())[i][1].data[:]
+
+
         self.info(verbose=verbose)
 
 
@@ -303,54 +296,27 @@ class CSRNet(nn.Module):
         device = x_im.device
         x = self.backend(x_im)
 
-        x0 = self.frontend(x)
-        x0 = self.output_layer_0(x0)
-        #x0 = nn.ReLU()(x0)
+        x0_64 = self.frontend(x)
+        x0 = self.output_layer_0(x0_64)
         x0 = x0.squeeze(1)  # count_0
 
-        x1 = self.up0(x)
-        x1 = self.dconv0(x1)
-        x1 = self.output_layer_1(x1)
-        #x1 = nn.ReLU()(x1)
-        x1 = x1.squeeze(1) # count_1
+        x1 = self.backend_1(x_im)
+        x1_64 = self.frontend_1(x1)
+        x1 = self.output_layer_1(x1_64)
+        x1 = x1.squeeze(1)  # count_1
 
-        x2 = self.up1(x)
-        x2 = self.up2(x2) 
-        x2 = self.output_layer_2(x2) 
-        #x2 = nn.ReLU()(x2)
-        x2 = x2.squeeze(1) # count_2
+        x2 = self.backend_2(x_im)
+        x2_64 = self.frontend_2(x2)
+        x2 = self.output_layer_2(x2_64)
+        x2 = x2.squeeze(1)  # count_2
+
+        x00 = self.down_fuse_0(x0_64)
+        x11 = self.down_fuse_1(x1_64)
+        x22 = self.down_fuse_2(x2_64)
         
-        ### attention module
-        x_att = self.backend_att(x_im)
-        x_att = self.dconv1(x_att)
-        x_att = nn.ReLU()(x_att)
-        x_att = self.dconv2(x_att)
-        x_att = nn.ReLU()(x_att)
-        x_att = self.dconv3(x_att)
-        
-        x_att = nn.Flatten()(x_att)
-        x_att = nn.Linear(x_att.shape[-1], 64, device=device)(x_att) 
-        x_att = nn.ReLU()(x_att)
-        x_att = nn.Linear(x_att.shape[-1], 3, device=device)(x_att) 
-        x_att = nn.Softmax()(x_att)
-        ### 
-
-        x00 = self.up_fuse_0(x0.unsqueeze(0))
-        x11 = self.up_fuse_1(x1.unsqueeze(0))
-        x22 = self.up_fuse_2(x2.unsqueeze(0))
-
         x_fuse = torch.cat([x00, x11, x22], dim=1)
-        x_att = x_att.unsqueeze(2)
-        x_att = x_att.unsqueeze(3)
-        
-        x_fuse = x_fuse * x_att
-
-        x_fuse = self.backend_fuse(x_fuse)
-        x_fuse = self.frontend_fuse(x_fuse)
-        x_fuse = self.output_layer_fuse(x_fuse)
-        #x0 = nn.ReLU()(x0)
+        x_fuse = self.output_layer_3(x_fuse)
         x_fuse = x_fuse.squeeze(1)  # count_fuse
-
 
         return x0, x1, x2, x_fuse
 
@@ -440,9 +406,9 @@ def make_layers(cfg, in_channels=3, batch_norm=False, dilation=False):
         else:
             conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=d_rate, dilation=d_rate)
             if batch_norm:
-                layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
+                layers += [conv2d, nn.BatchNorm2d(v), nn.LeakyReLU(inplace=True)]
             else:
-                layers += [conv2d, nn.ReLU(inplace=True)]
+                layers += [conv2d, nn.LeakyReLU(inplace=True)]
             in_channels = v
     return nn.Sequential(*layers)  
 
@@ -473,6 +439,7 @@ class ComputeLoss:
         #self.MSELoss = nn.MSELoss(reduction='mean') 
         self.MSELoss = nn.MSELoss(reduction='sum')
         self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
+        self.RANKLoss = nn.MarginRankingLoss()
 
 
     def __call__(self, p0, p1, p2, p3, targets):   #(self, p0, p1, p2, total_count, targets):
@@ -487,8 +454,9 @@ class ComputeLoss:
         tcount_0 = torch.zeros_like(p0, device=device)  
         tcount_1 = torch.zeros_like(p1, device=device)  
         tcount_2 = torch.zeros_like(p2, device=device)     
+        tcount_t = torch.zeros_like(p3, device=device)     
 
-        indices_0, indices_1, indices_2 = self.build_targets(targets, p2.size(1)*2, p2.size(2)*2) 
+        indices_t, indices_0, indices_1, indices_2 = self.build_targets(targets, p2.size(1)*2, p2.size(2)*2) 
         
         gj, gi = indices_2[0]  
         
@@ -496,6 +464,14 @@ class ComputeLoss:
         n = gi.shape[0]  
         if n:
             #tcount_2[b, gi, gj] = 1 
+
+            indices_t = indices_t[0]
+            indices_t = torch.stack(indices_t)
+            nonempty, count = torch.unique(indices_t, dim=1, return_counts=True) 
+
+            for k in range(nonempty.size(1)):
+                indx = nonempty[:, k]
+                tcount_t[b, indx[1], indx[0]] = float(count[k])
 
             indices_0 = indices_0[0]
             indices_0 = torch.stack(indices_0)
@@ -520,19 +496,23 @@ class ComputeLoss:
             for k in range(nonempty.size(1)):
                 indx = nonempty[:, k]
                 tcount_2[b, indx[1], indx[0]] = float(count[k])
-            
 
-        H0 = 1 
-        H1 = 1 
-        H2 = 1  
-        H3 = 1 
+        '''H0 = 0.7
+        H1 = 0.6 
+        H2 = 0.5
+        H3 = 1 '''
+
+        H0 = 0.2
+        H1 = 0.3 
+        H2 = 0.4
+        H3 = 0.1 
 
         lcount_0 += (self.MSELoss(p0, tcount_0) * H0) 
         lcount_1 += (self.MSELoss(p1, tcount_1) * H1) 
         lcount_2 += (self.MSELoss(p2, tcount_2) * H2)
-        lcount_3 += (self.MSELoss(p3, tcount_0) * H3)
+        lcount_3 += (self.MSELoss(p3, tcount_t) * H3)
         
-        return  [lcount_0, lcount_1, lcount_2, lcount_3], lcount_0.detach(), lcount_1.detach(), lcount_2.detach()
+        return  [lcount_0, lcount_1, lcount_2, lcount_3], lcount_0.detach(), lcount_1.detach(), lcount_2.detach(), lcount_3.detach()
 
 
     def build_targets(self, targets, s0, s1):
@@ -540,6 +520,16 @@ class ComputeLoss:
         device = targets.device
         
         gain = torch.ones(2, device=device)  # normalized to gridspace gain
+
+        ##### count
+        indices_t = []
+        gain = torch.tensor((s0//16, s1//16), device=device) #torch.tensor(p0.shape)[[2, 1]]  # xyxy gain
+        t = targets * gain
+
+        gij = t.long()
+        gi, gj = gij.T  # grid xy indices
+
+        indices_t.append((gj, gi))  
 
         ##### count
         indices_0 = []
@@ -571,4 +561,4 @@ class ComputeLoss:
 
         indices_2.append((gj, gi))  
 
-        return indices_0, indices_1, indices_2
+        return indices_t, indices_0, indices_1, indices_2

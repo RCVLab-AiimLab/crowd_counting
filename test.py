@@ -10,7 +10,7 @@ import time
 import math
 from torchvision import transforms
 import json
-from model import CSRNet, ComputeLoss 
+from model_org import CSRNet, ComputeLoss 
 import torch 
 import torchvision.transforms.functional as F
 from torchvision import transforms
@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='shanghaiA/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA, org, fuse, all64, Hs/', help="Set model description")
 parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
 parser.add_argument('--exp_sets', default='part_A_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
@@ -34,7 +34,7 @@ parser.add_argument('--device', default='1', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default='./runs/weights', type=str, help='checkpoint path')
 parser.add_argument('--log_dir', default='./runs/log', type=str, help='log dir')
 parser.add_argument('--density', default=False, type=bool, help='using density map instead of head locations?')
-parser.add_argument('--depth', default=True, type=bool, help='using depth?')
+parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
@@ -116,11 +116,12 @@ def test():
             length_0 = img_big.size(1)
             length_1 = img_big.size(2)
 
-            img_big_d = torch.zeros_like(img_big)
-            img_big_depth = img_big_depth/65535.0
-            img_big_d[0,:,:] = img_big_depth[0,:,:]
-            img_big_d[1,:,:] = img_big_depth[0,:,:]
-            img_big_d[2,:,:] = img_big_depth[0,:,:]
+            if args.depth:
+                img_big_d = torch.zeros_like(img_big)
+                img_big_depth = img_big_depth/65535.0
+                img_big_d[0,:,:] = img_big_depth[0,:,:]
+                img_big_d[1,:,:] = img_big_depth[0,:,:]
+                img_big_d[2,:,:] = img_big_depth[0,:,:]
 
             #vis_input(img_big, groundtruth)
             #vis_input(img_chip, target_chip)
@@ -138,7 +139,8 @@ def test():
                 img = torch.clone(img_big)
 
             imgs.append(img)
-            imgs_depth.append(img_depth)
+            if args.depth:
+                imgs_depth.append(img_depth)
 
             target_bigs.append(target_big)
 
@@ -148,7 +150,8 @@ def test():
                 targets.append(torch.from_numpy(target_big))
 
             imgs = torch.stack(imgs, dim=0).squeeze(1)
-            imgs_depth = torch.stack(imgs_depth, dim=0).squeeze(1)
+            if args.depth:
+                imgs_depth = torch.stack(imgs_depth, dim=0).squeeze(1)
             if not args.density:
                 targets = [ti for ti in targets if len(ti) != 0]
                 if not targets:
@@ -161,12 +164,18 @@ def test():
 
             if CUDA:
                 imgs = imgs.cuda()
-                imgs_depth = imgs_depth.cuda()
                 targets = targets.cuda()
+                if args.depth:
+                    imgs_depth = imgs_depth.cuda()
 
             with torch.no_grad():
-                predictions0, predictions1, predictions2, predictions3 = model(imgs, imgs_depth, training=False)
+                if args.depth:
+                    predictions0, predictions1, predictions2, predictions3 = model(imgs, imgs_depth, training=False)
+                else:
+                    predictions0, predictions1, predictions2, predictions3 = model(imgs, training=False)
 
+                #predictions3 = predictions3[0]
+                predictions3 = torch.sum(predictions3, dim=0).unsqueeze(0)
                 img_name = img_path.replace('.jpg','').replace('/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset/' + args.exp_sets + '/images/','')
 
                 if args.vis_patch:
@@ -174,7 +183,7 @@ def test():
                     vis_input(imgs[p_i, ...], target_bigs[p_i, ...], predictions0[p_i, ...], pred1=predictions1[p_i, :, :], pred2=predictions2[p_i, :, :])
                 
                 if args.vis_image:
-                    vis_image(args, img_name, img_big, imgs, target_bigs, predictions0, predictions1, predictions2=predictions2, predictions3= predictions3, vis_loc=False)
+                    vis_image(args, img_name, img_big, imgs, target_bigs, predictions0, predictions1, predictions2=predictions2, predictions3=predictions3, vis_loc=False)
 
                 if args.vis_loc:
                     vis_image(args, img_name, img_big, imgs, target_bigs, predictions0, predictions1, predictions2, vis_loc=True)
