@@ -58,8 +58,6 @@ class listDataset(Dataset):
             if self.transform2 is not None:
                 img_depth = self.transform2(img_depth)
 
-        
-
         return img, target, img_depth
 
 

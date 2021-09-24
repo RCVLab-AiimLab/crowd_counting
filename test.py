@@ -10,7 +10,7 @@ import time
 import math
 from torchvision import transforms
 import json
-from model_org import CSRNet, ComputeLoss 
+from model import MSPSNet, ComputeLoss 
 import torch 
 import torchvision.transforms.functional as F
 from torchvision import transforms
@@ -26,13 +26,13 @@ import matplotlib.pyplot as plt
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='shanghaiA, org, fuse, all64, Hs/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA/', help="Set model description")
 parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
 parser.add_argument('--exp_sets', default='part_A_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
-parser.add_argument('--device', default='1', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', default='./runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default='./runs/log', type=str, help='log dir')
+parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
+parser.add_argument('--checkpoint_path', default=path.parent/'runs/weights', type=str, help='checkpoint path')
+parser.add_argument('--log_dir', default=path.parent/'runs/log', type=str, help='log dir')
 parser.add_argument('--density', default=False, type=bool, help='using density map instead of head locations?')
 parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
@@ -49,9 +49,10 @@ parser.add_argument('--vis_loc', default=False, type=bool, help='visualize the l
 
 
 def test():
+    torch.manual_seed(0)
 
     args = parser.parse_args()
-    args.log_dir += ('/'+args.model_desc)
+    args.log_dir = args.log_dir / args.model_desc
     
     if args.use_gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.device
@@ -66,13 +67,13 @@ def test():
         for img_path in glob.glob(os.path.join(path, '*.jpg')):
             img_paths.append(img_path)
     
-    args.checkpoint_path += ('/'+args.model_desc)
+    args.checkpoint_path = args.checkpoint_path / args.model_desc
     if args.best:
-        args.checkpoint_path += 'model_best.pth.tar'
+        args.checkpoint_path = args.checkpoint_path / 'model_best.pth.tar'
     else:
-        args.checkpoint_path += 'checkpoint.pth.tar'
+        args.checkpoint_path = args.checkpoint_path / 'checkpoint.pth.tar'
 
-    model = CSRNet(backend=args.backend)
+    model = MSPSNet(backend=args.backend)
 
     if CUDA:
         model = model.cuda()
@@ -89,7 +90,7 @@ def test():
     pbar = enumerate(img_paths)
     pbar = tqdm(pbar, total=len(img_paths))
 
-    with open(args.log_dir + 'results_test.txt', 'w') as f:
+    with open(args.log_dir / 'results_test.txt', 'w') as f:
         for bi, img_path in pbar: 
             transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),])
             img_big = Image.open(img_path).convert('RGB')

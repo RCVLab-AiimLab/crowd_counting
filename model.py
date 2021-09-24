@@ -232,9 +232,9 @@ def _resnet(arch, block, layers, pretrained, progress, **kwargs):
     return model
 
 
-class CSRNet(nn.Module):
+class MSPSNet(nn.Module):
     def __init__(self, load_weights=False, verbose=False, backend='vgg'):
-        super(CSRNet, self).__init__()
+        super(MSPSNet, self).__init__()
         self.seen = 0
 
         if backend == 'resnet':
@@ -248,8 +248,8 @@ class CSRNet(nn.Module):
             self.backend_2 = make_layers(self.backend_feat_2, in_channels=3)    
         
         self.frontend_feat  = [512, 512, 512, 256, 128, 64]
-        self.frontend_feat_1  = [256, 128, 64]
-        self.frontend_feat_2  = [128, 64]
+        self.frontend_feat_1  = [256, 256, 256, 256, 128, 128, 128, 64]
+        self.frontend_feat_2  = [128, 128, 128, 128, 128, 64, 64, 64, 64, 64]
         self.frontend = make_layers(self.frontend_feat, in_channels=512, dilation=True)
         self.frontend_1 = make_layers(self.frontend_feat_1, in_channels=256, dilation=True)
         self.frontend_2 = make_layers(self.frontend_feat_2, in_channels=128, dilation=True)
@@ -439,10 +439,9 @@ class ComputeLoss:
         #self.MSELoss = nn.MSELoss(reduction='mean') 
         self.MSELoss = nn.MSELoss(reduction='sum')
         self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
-        self.RANKLoss = nn.MarginRankingLoss()
 
 
-    def __call__(self, p0, p1, p2, p3, targets):   #(self, p0, p1, p2, total_count, targets):
+    def __call__(self, p0, p1, p2, p3, targets): 
         device = targets.device
         
         # Losses
@@ -497,15 +496,10 @@ class ComputeLoss:
                 indx = nonempty[:, k]
                 tcount_2[b, indx[1], indx[0]] = float(count[k])
 
-        '''H0 = 0.7
-        H1 = 0.6 
-        H2 = 0.5
-        H3 = 1 '''
-
-        H0 = 0.2
-        H1 = 0.3 
-        H2 = 0.4
-        H3 = 0.1 
+        H0 = 0.005
+        H1 = 0.007 
+        H2 = 0.009
+        H3 = 0.003
 
         lcount_0 += (self.MSELoss(p0, tcount_0) * H0) 
         lcount_1 += (self.MSELoss(p1, tcount_1) * H1) 
@@ -523,7 +517,7 @@ class ComputeLoss:
 
         ##### count
         indices_t = []
-        gain = torch.tensor((s0//16, s1//16), device=device) #torch.tensor(p0.shape)[[2, 1]]  # xyxy gain
+        gain = torch.tensor((s0//16, s1//16), device=device)  
         t = targets * gain
 
         gij = t.long()
@@ -533,7 +527,7 @@ class ComputeLoss:
 
         ##### count
         indices_0 = []
-        gain = torch.tensor((s0//8, s1//8), device=device) #torch.tensor(p0.shape)[[2, 1]]  # xyxy gain
+        gain = torch.tensor((s0//8, s1//8), device=device) 
         t = targets * gain
 
         gij = t.long()
@@ -543,7 +537,7 @@ class ComputeLoss:
 
         ##### count
         indices_1 = []
-        gain = torch.tensor((s0//4, s1//4), device=device) #torch.tensor(p0.shape)[[2, 1]]  # xyxy gain
+        gain = torch.tensor((s0//4, s1//4), device=device) 
         t = targets * gain
 
         gij = t.long()
@@ -553,7 +547,7 @@ class ComputeLoss:
         
         ##### loc
         indices_2 = []
-        gain = torch.tensor((s0//2, s1//2), device=device) #torch.tensor(p0.shape)[[2, 1]]  # xyxy gain
+        gain = torch.tensor((s0//2, s1//2), device=device)
         t = targets * gain
 
         gij = t.long()

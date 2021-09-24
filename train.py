@@ -20,7 +20,7 @@ path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
 # GENERAL
-parser.add_argument('--model_desc', default='shanghaiA', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiA/', help="Set model description")
 parser.add_argument('--pre_model_desc', default='shanghaiA_pre/', help="Set model description")
 parser.add_argument('--train_json', default=path/'datasets/shanghai/part_A_train.json', help='path to train json')
 parser.add_argument('--val_json', default=path/'datasets/shanghai/part_A_test.json', help='path to test json')
@@ -29,7 +29,7 @@ parser.add_argument('--use_gpu', default=True, action="store_false", help="Indic
 parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default=path.parent/'runs/weights', type=str, help='checkpoint path')
 parser.add_argument('--log_dir', default=path.parent/'runs/log', type=str, help='log dir')
-parser.add_argument('--exp', default='shanghai', type=str, help='set dataset for training experiment')
+parser.add_argument('--exp', default='shanghai', type=str, help='shanghai or ucf_qnrf, set dataset for training experiment')
 parser.add_argument('--density', default=False, type=bool, help='using density map instead of head locations?')
 parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
@@ -42,7 +42,7 @@ parser.add_argument('--backend', default='vgg', type=str, help='vgg or resnet')
 # TRAINING
 parser.add_argument('--batch_size', default=512, type=int)
 parser.add_argument('--epochs', default=1000, type=int, help="Number of epochs to train for")
-parser.add_argument('--workers', default=4, type=int, help="Number of workers in loading dataset")
+parser.add_argument('--workers', default=8, type=int, help="Number of workers in loading dataset")
 parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
 parser.add_argument('--lr0', default=0.0000001, type=float, help="initial learning rate")
@@ -144,8 +144,8 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
                 if args.depth:
                     imgs_depth = imgs_depth.cuda()
             
-            '''if epoch <= 1:
-                tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])'''
+            #if epoch <= 1:
+            #    tb_writer.add_graph(torch.jit.trace(model, imgs, strict=False), [])
 
             if args.depth:
                 pred0, pred1, pred2, pred3 = model(imgs, imgs_depth, training=True)  # forward
@@ -402,6 +402,21 @@ def main():
         else:
             train_list_depth = None
             val_list_depth = None
+
+    elif args.exp == 'ucf_qnrf':
+        args.train_json = path/'datasets/ucf_qnrf/train.json'
+        args.val_json = path/'datasets/ucf_qnrf/test.json'
+        with open(args.train_json, 'r') as outfile:
+            train_list_main = json.load(outfile)
+        with open(args.val_json, 'r') as outfile:       
+            val_list_main = json.load(outfile)
+
+        train_list = ['/home/mohsen/Desktop/UCF-QNRF_ECCV18/' + st for st in train_list_main]
+        val_list = ['/home/mohsen/Desktop/UCF-QNRF_ECCV18/' + st for st in val_list_main]
+
+        train_list_depth = None
+        val_list_depth = None
+        
 
     if args.use_gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.device
