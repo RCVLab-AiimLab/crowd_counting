@@ -556,3 +556,5 @@ class ComputeLoss:
         indices_2.append((gj, gi))  
 
         return indices_t, indices_0, indices_1, indices_2
+
+

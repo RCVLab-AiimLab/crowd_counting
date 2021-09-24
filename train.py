@@ -9,7 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision import datasets, transforms
 from torch.autograd import Variable
 import pathlib
-from model import ComputeLoss, CSRNet
+from model import ComputeLoss, MSPSNet
 from dataset import listDataset
 from tqdm import tqdm
 import math
@@ -425,7 +425,7 @@ def main():
     else:
         CUDA = False
 
-    model = CSRNet(backend=args.backend)
+    model = MSPSNet(backend=args.backend)
 
     if CUDA:
         model = model.cuda()
