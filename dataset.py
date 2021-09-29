@@ -8,7 +8,7 @@ from PIL import Image
 import torchvision.transforms.functional as F
 
 class listDataset(Dataset):
-    def __init__(self, root, depthroot, shape=None, density=False, depth=False, shuffle=True, transform1=None, transform2=None, train=False, seen=0, batch_size=1, num_workers=4):
+    def __init__(self, root, depthroot, shape=None, density=False, depth=False, augment=False, shuffle=True, transform1=None, transform2=None, train=False, seen=0, batch_size=1, num_workers=4):
         #if shuffle==True:
         if depth:
             main_root = list(zip(root, depthroot))
@@ -30,6 +30,7 @@ class listDataset(Dataset):
         self.num_workers = num_workers
         self.density = density
         self.depth = depth
+        self.augment = augment
         
     def __len__(self):
         return self.nSamples
@@ -44,7 +45,7 @@ class listDataset(Dataset):
             img_depth_path = None
 
         
-        img, target, img_depth = load_data(img_path, img_depth_path, self.train, density=self.density, depth=self.depth)
+        img, target, img_depth = load_data(img_path, img_depth_path, self.train, density=self.density, depth=self.depth, augment=self.augment)
         
         #img = 255.0 * F.to_tensor(img)
         
@@ -61,7 +62,7 @@ class listDataset(Dataset):
         return img, target, img_depth
 
 
-def load_data(img_path, depth_path=None, train=True, density=False, depth=False):
+def load_data(img_path, depth_path=None, train=True, density=False, depth=False, augment=False):
     if density:
         gt_path = img_path.replace('.jpg','.h5').replace('images','ground_truth')
     else:
@@ -77,6 +78,23 @@ def load_data(img_path, depth_path=None, train=True, density=False, depth=False)
         depth_path = depth_path.replace('depth_resized_h5', 'depth').replace('.h5', '.png')
         img_depth = Image.open(depth_path)
         img_depth = np.array(img_depth, dtype=float)
+    
+    if augment:
+        crop_size = (img.size[0]//2, img.size[1]//2)
+        if random.randint(0,9)<= -1:
+            dx = int(random.randint(0, 1) * img.size[0] * 1./2)
+            dy = int(random.randint(0, 1) * img.size[1] * 1./2)
+        else:
+            dx = int(random.random() * img.size[0] * 1./2)
+            dy = int(random.random() * img.size[1] * 1./2)
+        
+        img = img.crop((dx, dy, crop_size[0] + dx, crop_size[1] + dy))
+        target = target[dy:crop_size[1] + dy, dx:crop_size[0] + dx]
+        
+        if random.random() > 0.8:
+            target = np.fliplr(target)
+            target = torch.from_numpy(target.copy())
+            img = img.transpose(Image.FLIP_LEFT_RIGHT)
 
     return img, target, img_depth
     

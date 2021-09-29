@@ -32,6 +32,7 @@ parser.add_argument('--log_dir', default=path.parent/'runs/log', type=str, help=
 parser.add_argument('--exp', default='shanghai', type=str, help='shanghai or ucf_qnrf, set dataset for training experiment')
 parser.add_argument('--density', default=False, type=bool, help='using density map instead of head locations?')
 parser.add_argument('--depth', default=False, type=bool, help='using depth?')
+parser.add_argument('--augment', default=True, type=bool, help='augmentation?')
 
 # MODEL
 parser.add_argument('--model_file', default=path/'model.yaml')
@@ -62,6 +63,7 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
                        shuffle=True,
                        density=args.density,
                        depth=args.depth,
+                       augment=args.augment,
                        transform1=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
                        transform2=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.502], std=[0.291]),]), 
                        train=True, 
@@ -133,7 +135,7 @@ def train(args, model, optimizer, train_list, val_list, train_list_depth, val_li
             if not args.density:
                 targets = [ti for ti in targets if len(ti) != 0]
                 if not targets:
-                    targets.append(torch.tensor([[-1, 0, 0, 0, 0]]))
+                    targets.append(torch.tensor([[0, 0]]))
                 targets = torch.cat(targets)
             else:
                 targets = torch.stack(targets, dim=0)
@@ -226,6 +228,7 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
                     shuffle=False, 
                     density=args.density,
                     depth=args.depth,
+                    augment=args.augment,
                     transform1=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
                     transform2=transforms.Compose([transforms.ToTensor(),]), 
                     train=False), 
@@ -284,7 +287,7 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
             if not args.density:
                 targets = [ti for ti in targets if len(ti) != 0]
                 if not targets:
-                    targets.append(torch.tensor([[-1, 0, 0, 0, 0]]))
+                    targets.append(torch.tensor([[0, 0]]))
                 targets = torch.cat(targets)
             else:
                 targets = torch.stack(targets, dim=0)

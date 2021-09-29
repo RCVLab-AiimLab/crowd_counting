@@ -249,7 +249,8 @@ class MSPSNet(nn.Module):
         
         self.frontend_feat  = [512, 512, 512, 256, 128, 64]
         self.frontend_feat_1  = [256, 256, 256, 256, 128, 128, 128, 64]
-        self.frontend_feat_2  = [128, 128, 128, 128, 128, 64, 64, 64, 64, 64]
+        self.frontend_feat_2  = [128, 128, 128, 64, 64]
+        #self.frontend_feat_2  = [128, 128, 128, 128, 128, 64, 64, 64, 64, 64]
         self.frontend = make_layers(self.frontend_feat, in_channels=512, dilation=True)
         self.frontend_1 = make_layers(self.frontend_feat_1, in_channels=256, dilation=True)
         self.frontend_2 = make_layers(self.frontend_feat_2, in_channels=128, dilation=True)
@@ -317,6 +318,9 @@ class MSPSNet(nn.Module):
         x_fuse = torch.cat([x00, x11, x22], dim=1)
         x_fuse = self.output_layer_3(x_fuse)
         x_fuse = x_fuse.squeeze(1)  # count_fuse
+
+        #if not training:
+        #    x2 = x2.sigmoid()
 
         return x0, x1, x2, x_fuse
 
@@ -462,7 +466,6 @@ class ComputeLoss:
         b = 0
         n = gi.shape[0]  
         if n:
-            #tcount_2[b, gi, gj] = 1 
 
             indices_t = indices_t[0]
             indices_t = torch.stack(indices_t)
@@ -488,23 +491,25 @@ class ComputeLoss:
                 indx = nonempty[:, k]
                 tcount_1[b, indx[1], indx[0]] = float(count[k])
 
-            indices_2 = indices_2[0]
+            tcount_2[b, gi, gj] = 1 
+
+            '''indices_2 = indices_2[0]
             indices_2 = torch.stack(indices_2)
             nonempty, count = torch.unique(indices_2, dim=1, return_counts=True) 
 
             for k in range(nonempty.size(1)):
                 indx = nonempty[:, k]
-                tcount_2[b, indx[1], indx[0]] = float(count[k])
+                tcount_2[b, indx[1], indx[0]] = float(count[k])'''
 
-        H0 = 0.005
-        H1 = 0.007 
-        H2 = 0.009
-        H3 = 0.003
+        H0 = 0.2
+        H1 = 0.2
+        H2 = 10
+        H3 = 0.2
 
         lcount_0 += (self.MSELoss(p0, tcount_0) * H0) 
         lcount_1 += (self.MSELoss(p1, tcount_1) * H1) 
-        lcount_2 += (self.MSELoss(p2, tcount_2) * H2)
-        lcount_3 += (self.MSELoss(p3, tcount_t) * H3)
+        lcount_2 += (self.MSELoss(p2, tcount_2) * H2)  
+        lcount_3 += (self.MSELoss(p3, tcount_t) * H3)  
         
         return  [lcount_0, lcount_1, lcount_2, lcount_3], lcount_0.detach(), lcount_1.detach(), lcount_2.detach(), lcount_3.detach()
 
@@ -556,5 +561,6 @@ class ComputeLoss:
         indices_2.append((gj, gi))  
 
         return indices_t, indices_0, indices_1, indices_2
+
 
 
