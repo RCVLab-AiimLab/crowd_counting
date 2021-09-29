@@ -46,7 +46,7 @@ parser.add_argument('--epochs', default=1000, type=int, help="Number of epochs t
 parser.add_argument('--workers', default=8, type=int, help="Number of workers in loading dataset")
 parser.add_argument('--start_epoch', default=0, type=int, help="start_epoch")
 parser.add_argument('--vis', default=False, type=bool, help='visualize the inputs') 
-parser.add_argument('--lr0', default=0.0000001, type=float, help="initial learning rate")
+parser.add_argument('--lr0', default=0.00001, type=float, help="initial learning rate")
 parser.add_argument('--weight_decay', default=0.0005, type=float, help="weight_decay")
 parser.add_argument('--momentum', default=0.937, type=float, help="momentum")
 parser.add_argument('--adam', default=True, type=bool, help='use torch.optim.Adam() optimizer') 
@@ -228,7 +228,7 @@ def validate(args, val_list, val_list_depth, model, CUDA, compute_loss):
                     shuffle=False, 
                     density=args.density,
                     depth=args.depth,
-                    augment=args.augment,
+                    augment=False,
                     transform1=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
                     transform2=transforms.Compose([transforms.ToTensor(),]), 
                     train=False), 

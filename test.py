@@ -44,7 +44,7 @@ parser.add_argument('--backend', default='vgg', type=str, help='vgg or resnet')
 
 parser.add_argument('--best', default=False, type=bool, help='best or last saved checkpoint?') 
 parser.add_argument('--vis_patch', default=False, type=bool, help='visualize the patches') 
-parser.add_argument('--vis_image', default=True, type=bool, help='visualize the whole image') 
+parser.add_argument('--vis_image', default=False, type=bool, help='visualize the whole image') 
 parser.add_argument('--vis_loc', default=False, type=bool, help='visualize the locations') 
 
 
