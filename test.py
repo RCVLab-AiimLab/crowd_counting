@@ -13,7 +13,6 @@ import json
 from model import MSPSNet, ComputeLoss 
 import torch 
 import torchvision.transforms.functional as F
-from torchvision import transforms
 import PIL.Image as Image
 from utils import zeropad, vis_input
 import cv2
@@ -26,11 +25,11 @@ import matplotlib.pyplot as plt
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='shanghaiA/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiB/', help="Set model description")
 parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
-parser.add_argument('--exp_sets', default='part_A_final/test_data')
+parser.add_argument('--exp_sets', default='part_B_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
-parser.add_argument('--device', default='0', type=str, help='GPU id to use.')
+parser.add_argument('--device', default='1', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default=path.parent/'runs/weights', type=str, help='checkpoint path')
 parser.add_argument('--log_dir', default=path.parent/'runs/log', type=str, help='log dir')
 parser.add_argument('--density', default=False, type=bool, help='using density map instead of head locations?')
@@ -42,7 +41,7 @@ parser.add_argument('--cell_size', default=128, type=int, help="cell size")
 parser.add_argument('--threshold', default=0.3, help="[0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.2, 0.3, 0.4, 0.5], threshold for the classification output")
 parser.add_argument('--backend', default='vgg', type=str, help='vgg or resnet')
 
-parser.add_argument('--best', default=False, type=bool, help='best or last saved checkpoint?') 
+parser.add_argument('--best', default=True, type=bool, help='best or last saved checkpoint?') 
 parser.add_argument('--vis_patch', default=False, type=bool, help='visualize the patches') 
 parser.add_argument('--vis_image', default=False, type=bool, help='visualize the whole image') 
 parser.add_argument('--vis_loc', default=False, type=bool, help='visualize the locations') 
@@ -56,7 +55,7 @@ def test():
     
     if args.use_gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.device
-        torch.cuda.manual_seed(time.time())
+        #torch.cuda.manual_seed(time.time())
         CUDA =True
     else:
         CUDA = False
@@ -175,7 +174,6 @@ def test():
                 else:
                     predictions0, predictions1, predictions2, predictions3 = model(imgs, training=False)
 
-                #predictions3 = predictions3[0]
                 predictions3 = torch.sum(predictions3, dim=0).unsqueeze(0)
                 img_name = img_path.replace('.jpg','').replace('/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset/' + args.exp_sets + '/images/','')
 
@@ -203,12 +201,6 @@ def test():
                 mae_count_1 = abs(pred_count_1 - targets)
                 mae_count_2 = abs(pred_count_2 - targets)
                 mae_count_T = abs(total_count - targets)
-
-                '''
-                if mae_count_0 > 20:
-                    temp += 1
-                    #print(temp, targets, pred_count_0.item(), mae_count_0.item(), img_name)
-                '''
                 
                 sum_mae_count_0 += mae_count_0
                 sum_mae_count_1 += mae_count_1
@@ -229,7 +221,7 @@ def test():
 
                 #sum_best += mae_count_0 if (mae_count_0 < mae_count_1) else mae_count_1
 
-                s = str((bi, 'MAE: ', mae_count_0.item(), 'Pred: ', pred_count_0.item(), 'target: ', targets))
+                s = str((bi, 'MAE: ', round(mae_count_0.item(), 2), 'Pred: ', round(pred_count_0.item(), 2), 'target: ', targets))
                 #pbar.set_description(s)
 
                 s = '*Target {targets:.0f}\t *Pred_0 {pred_0:.3f}\t *Pred_1 {pred_1:.3f}\t *Pred_2 {pred_2:.3f}\t *MAE_0 {mae_0:.3f}\t *MAE_1 {mae_1:.3f}\t *MAE_2 {mae_2:.3f} \n'.\
@@ -371,7 +363,7 @@ def vis_image(args, img_name, img_big, imgs, target_chips, predictions0, predict
     if predictions2 is not None:
         plt.subplot(2,3,6)
         plt.imshow(img)
-        plt.imshow(pred_count_im2)#, alpha=0.9)
+        plt.imshow(pred_count_im2, alpha=0.9)
         pred_count2 = predictions2.sum()     
         plt.title('P: ' + str(pred_count2.round().item()) + '  MAE: ' + str((pred_count2-target).round().item()))
 

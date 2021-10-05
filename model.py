@@ -501,10 +501,10 @@ class ComputeLoss:
                 indx = nonempty[:, k]
                 tcount_2[b, indx[1], indx[0]] = float(count[k])'''
 
-        H0 = 0.2
+        H0 = 0.1
         H1 = 0.2
-        H2 = 10
-        H3 = 0.2
+        H2 = 0.3
+        H3 = 0.1
 
         lcount_0 += (self.MSELoss(p0, tcount_0) * H0) 
         lcount_1 += (self.MSELoss(p1, tcount_1) * H1) 
@@ -561,6 +561,4 @@ class ComputeLoss:
         indices_2.append((gj, gi))  
 
         return indices_t, indices_0, indices_1, indices_2
-
-
 
