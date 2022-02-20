@@ -1,4 +1,4 @@
-
+#Import packages
 import os
 import glob
 import pathlib
@@ -21,17 +21,17 @@ import matplotlib.pyplot as plt
 
 
 
-
+#Parse arguments
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 
-parser.add_argument('--model_desc', default='shanghaiB/', help="Set model description")
+parser.add_argument('--model_desc', default='shanghaiB, paper4/', help="Set model description")
 parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
 parser.add_argument('--exp_sets', default='part_B_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
 parser.add_argument('--device', default='1', type=str, help='GPU id to use.')
 parser.add_argument('--checkpoint_path', default=path.parent/'runs/weights', type=str, help='checkpoint path')
-parser.add_argument('--log_dir', default=path.parent/'runs/log', type=str, help='log dir')
+parser.add_argument('--log_dir', default=path.parent/'/log', type=str, help='log dir')
 parser.add_argument('--density', default=False, type=bool, help='using density map instead of head locations?')
 parser.add_argument('--depth', default=False, type=bool, help='using depth?')
 
@@ -46,7 +46,7 @@ parser.add_argument('--vis_patch', default=False, type=bool, help='visualize the
 parser.add_argument('--vis_image', default=False, type=bool, help='visualize the whole image') 
 parser.add_argument('--vis_loc', default=False, type=bool, help='visualize the locations') 
 
-
+#Testing function
 def test():
     torch.manual_seed(0)
 
@@ -243,7 +243,7 @@ def test():
     print(' * MAE_BestOf3 {mae_best:.3f}'.format(mae_best=(sum_best/dataset_length).item()))
 
 
-
+#Visulization
 def vis_locations(image, loc_im, gt):
     from math import sqrt
     from skimage import data
@@ -377,6 +377,6 @@ def vis_image(args, img_name, img_big, imgs, target_chips, predictions0, predict
     plt.show()
 
 
-
+#Main function
 if __name__ == '__main__':
     test()

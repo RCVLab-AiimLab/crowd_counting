@@ -1,4 +1,4 @@
-
+#Import packages
 import numpy as np 
 import shutil
 import h5py
@@ -10,11 +10,9 @@ import scipy
 from scipy.spatial import KDTree
 from scipy.ndimage.filters import gaussian_filter
 
-def save_checkpoint(state, is_best, filename='../checkpoint.pth.tar'):
+#Useful functions
+def save_checkpoint(state, filename='../checkpoint.pth.tar'):
     torch.save(state, filename)
-    if is_best:
-        best_model_path = filename.parent / 'model_best.pth.tar'
-        shutil.copyfile(filename, best_model_path) 
 
 
 def zeropad(img, h, w, target=False):

@@ -1,3 +1,5 @@
+#This code is for model evaluation
+#Import packages
 import os
 import glob
 import argparse
@@ -12,29 +14,29 @@ import cv2
 import torch 
 from model import MSPSNet 
 from sklearn.metrics import auc
+from math import sqrt
 
 
-
+#Argument parser
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
-
-parser.add_argument('--model_desc', default='shanghaiB/', help="Set model description")
-parser.add_argument('--dataset_path', default='/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset', help='path to dataset')
-parser.add_argument('--exp_sets', default='part_B_final/test_data')
+parser.add_argument('--model_desc', default='ShanghaiA_multi/', help="Set model description")
+parser.add_argument('--dataset_path', default='C:/Users/mahdi/Desktop/SASNet_ROOT/ShanghaiTech', help='path to dataset')
+parser.add_argument('--exp_sets', default='part_A_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
 parser.add_argument('--device', default='1', type=str, help='GPU id to use.')
-parser.add_argument('--checkpoint_path', default=path.parent/'runs/weights', type=str, help='checkpoint path')
+parser.add_argument('--checkpoint_path', default=path/'runs/weights', type=str, help='checkpoint path')
 parser.add_argument('--log_dir', default=path.parent/'runs/log', type=str, help='log dir')
 
 parser.add_argument('--model_file', default=path/'model.yaml')
 
-parser.add_argument('--best', default=True, type=bool, help='best or last saved checkpoint?') 
+parser.add_argument('--best', default=False, type=bool, help='best or last saved checkpoint?') 
 parser.add_argument('--vis_patch', default=False, type=bool, help='visualize the patches') 
 parser.add_argument('--vis_image', default=False, type=bool, help='visualize the whole image') 
 parser.add_argument('--vis_loc', default=False, type=bool, help='visualize the locations') 
 
 
-
+#Main function
 def eval():
     args = parser.parse_args()
     args.log_dir = args.log_dir / args.model_desc
@@ -46,6 +48,7 @@ def eval():
     else:
         CUDA = False
 
+    #Configure weight's path
     path_sets = [os.path.join(args.dataset_path, args.exp_sets,'images')]
     img_paths = []
     for path in path_sets:
@@ -58,6 +61,7 @@ def eval():
     else:
         args.checkpoint_path = args.checkpoint_path / 'checkpoint.pth.tar'
 
+    #Load model
     model = MSPSNet()
 
     if CUDA:
@@ -76,6 +80,7 @@ def eval():
     pbar = enumerate(img_paths)
     pbar = tqdm(pbar, total=len(img_paths))
 
+    #Evaluate
     for bi, img_path in pbar: 
         transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),])
         img_big = Image.open(img_path).convert('RGB')
@@ -118,7 +123,7 @@ def eval():
             average_precision.append(loc_eval(imgs[0,...], predictions2[0,...], target_big))
 
             predictions3 = torch.sum(predictions3, dim=0).unsqueeze(0)
-            img_name = img_path.replace('.jpg','').replace('/media/mohsen/myDrive/datasets/ShanghaiTech_Crowd_Counting_Dataset/' + args.exp_sets + '/images/','')
+            img_name = img_path.replace('.jpg','').replace('C:/Users/mahdi/Desktop/SASNet_ROOT/ShanghaiTech' + args.exp_sets + '/images/','')
 
             targets = targets.shape[0]
 
@@ -155,10 +160,9 @@ def eval():
     AP = sum(average_precision) / (len(average_precision))
     print(' * AP:', round(AP, 2))
 
-    return AP
 
-
-def loc_eval(img, pred, target):
+#Evalute the localization accuarcy
+def loc_eval(img, pred, target, vis=False):
 
     upsample = torch.nn.Upsample(scale_factor=2, mode='nearest')
     pred = upsample(pred.unsqueeze(0).unsqueeze(0)).squeeze(0).squeeze(0).squeeze(0).cpu().numpy()
@@ -169,7 +173,7 @@ def loc_eval(img, pred, target):
 
     n_t = target.sum().numpy()
     
-    kernel = np.ones((5,5), np.uint8)
+    kernel = np.ones((3,3), np.uint8)
     target = cv2.dilate(np.uint8(target), kernel, iterations=1)
 
     h = img.shape[0] - pred.shape[0]
@@ -180,7 +184,6 @@ def loc_eval(img, pred, target):
     thresh = np.linspace(0, 1)
     for i, th in enumerate(thresh):
         pred_th = (pred > th)
-        #pred_th = cv2.threshold(np.float32(pred), -0.0001, 1, cv2.THRESH_BINARY)[1]  # ensure binary
         n_p, labels_p = cv2.connectedComponents(pred_th.astype(np.uint8))
 
         overlap = target & pred_th
@@ -194,7 +197,7 @@ def loc_eval(img, pred, target):
         R = TP / (TP + FN)
 
         #R = TP / n_t
-
+        
         p_check, r_check = True, True
         if i > 0:
             p_check = P >= precision[-1]
@@ -204,15 +207,39 @@ def loc_eval(img, pred, target):
             precision.append(P)
             recall.append(R)
 
+        if R > 0.7 and th != 0 and vis:
+            vis_blobs(img, labels_o, target)
+
+
     average_precision = auc(recall, precision)
     
     return average_precision
+
+
+#Visualize the blobs
+def vis_blobs(image, pred, gt):
+
+    im = np.uint8(cv2.bitwise_not(pred) * (-1))
+
+    params = cv2.SimpleBlobDetector_Params()
+    detector = cv2.SimpleBlobDetector_create(params)
+
+    # Detect blobs.
+    keypoints = detector.detect(im)
+    im = cv2.bitwise_not(im)
+    im_with_keypoints = cv2.drawKeypoints(im, keypoints, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    images = (image, im_with_keypoints)
+
+    plt.imshow(images[0])
+    plt.imshow(images[1], alpha=0.5)
+
+    plt.tight_layout()
+    plt.show()
 
 
 
 
 if __name__ == '__main__':
     eval()
-
 
 

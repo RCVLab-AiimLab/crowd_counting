@@ -235,7 +235,6 @@ def _resnet(arch, block, layers, pretrained, progress, **kwargs):
 class MSPSNet(nn.Module):
     def __init__(self, load_weights=False, verbose=False, backend='vgg'):
         super(MSPSNet, self).__init__()
-        self.seen = 0
 
         if backend == 'resnet':
             self.backend = _resnet('wide_resnet101_2', Bottleneck, [3, 4, 6, 3], pretrained=False, progress=True)
