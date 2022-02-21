@@ -1,19 +1,14 @@
 #Import packages
 import numpy as np 
-import shutil
-import h5py
 import torch
 import cv2 
 import matplotlib.pyplot as plt
 from matplotlib import cm as CM
-import scipy
-from scipy.spatial import KDTree
 from scipy.ndimage.filters import gaussian_filter
 
 #Useful functions
 def save_checkpoint(state, filename='../checkpoint.pth.tar'):
     torch.save(state, filename)
-
 
 def zeropad(img, h, w, target=False):
     if not target:
@@ -56,7 +51,6 @@ def vis_input(im, target=None, pred0=None, pred1=None, pred2=None):
     if pred0 is not None:
         pred0 = pred0.cpu().numpy()
         plt.subplot(2,i,4).imshow(pred0, cmap=CM.jet)
-        #count = 1/predicted.mean()
         count = pred0.sum()
         plt.title('Pred: ' + str(count.item()))
     
@@ -74,7 +68,6 @@ def vis_input(im, target=None, pred0=None, pred1=None, pred2=None):
 
     plt.show()
 
-
 class AverageMeter(object):
     """Computes and stores the average and current value"""
     def __init__(self):
@@ -91,32 +84,3 @@ class AverageMeter(object):
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count 
-
-
-#this is borrowed from https://github.com/davideverona/deep-crowd-counting_crowdnet
-def gaussian_filter_density(gt):
-    #print(gt.shape)
-    density = np.zeros(gt.shape, dtype=np.float32)
-    gt_count = np.count_nonzero(gt)
-    if gt_count == 0:
-        return density
-
-    #pts = np.array(list(zip(np.nonzero(gt))))
-    pts = np.array(list(zip(np.nonzero(gt)[1], np.nonzero(gt)[0])))
-    leafsize = 2048
-    # build kdtree
-    tree = KDTree(pts.copy(), leafsize=leafsize)
-    # query kdtree
-    distances, locations = tree.query(pts, k=4)
-
-    #print('generate density...')
-    for i, pt in enumerate(pts):
-        pt2d = np.zeros(gt.shape, dtype=np.float32)
-        pt2d[pt[1],pt[0]] = 1.
-        if gt_count > 3: ######## 1
-            sigma = (distances[i][1]+distances[i][2]+distances[i][3])*0.1
-        else:
-            sigma = np.average(np.array(gt.shape))/2./2. #case: 1 point
-        density += scipy.ndimage.filters.gaussian_filter(pt2d, sigma, mode='constant')
-    #print('done.')
-    return density

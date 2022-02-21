@@ -21,7 +21,7 @@ from math import sqrt
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
 parser.add_argument('--model_desc', default='ShanghaiA_multi/', help="Set model description")
-parser.add_argument('--dataset_path', default='C:/Users/mahdi/Desktop/SASNet_ROOT/ShanghaiTech', help='path to dataset')
+parser.add_argument('--dataset_path', default='<PATH_TO_DATASET>/ShanghaiTech', help='path to dataset')
 parser.add_argument('--exp_sets', default='part_A_final/test_data')
 parser.add_argument('--use_gpu', default=True, help="indicates whether or not to use GPU")
 parser.add_argument('--device', default='1', type=str, help='GPU id to use.')

@@ -17,7 +17,6 @@ import cv2
 #Arguments parser
 path = pathlib.Path(__file__).parent.absolute()
 parser = argparse.ArgumentParser(description='RCVLab-AiimLab Crowd counting')
-print(path)
 # GENERAL
 parser.add_argument('--model_desc', default='ShanghaiA_multi/', help="Set model description")
 parser.add_argument('--pre_model_desc', default='shanghaiA_pre/', help="Set model description")
@@ -146,7 +145,6 @@ def train(args, model, optimizer, train_list, tb_writer, CUDA):
             pbar.set_description(s)
 
             imgs = []
-            imgs_depth = []
             targets = []
 
             # end batch ------------
@@ -187,24 +185,10 @@ def main():
         os.mkdir(args.checkpoint_path)
     args.checkpoint_path = args.checkpoint_path / 'checkpoint.pth.tar'
 
-    if args.exp == 'shanghai':
-        with open(args.train_json, 'r') as outfile:        
-            train_list_main = json.load(outfile)
-        #This part of the code is borrowed from https://github.com/leeyeehoo/CSRNet-pytorch
-        train_list = [st.replace('/home/leeyh/Downloads/Shanghai', 'C:/Users/mahdi/Desktop/SASNet_ROOT/ShanghaiTech') for st in train_list_main]
-        print(train_list)
-
-    elif args.exp == 'ucf_qnrf':
-        args.train_json = path/'datasets/ucf_qnrf/train.json'
-        with open(args.train_json, 'r') as outfile:
-            train_list_main = json.load(outfile)
-
-        train_list = ['/home/mohsen/Desktop/UCF-QNRF_ECCV18/' + st for st in train_list_main]
-    
-    elif args.exp == 'sim': 
-        with open(args.train_json, 'r') as outfile:        
-            train_list = json.load(outfile)
-
+    with open(args.train_json, 'r') as outfile:        
+        train_list_main = json.load(outfile)
+    #This part of the code is borrowed from https://github.com/leeyeehoo/CSRNet-pytorch
+    train_list = [st.replace('/home/leeyh/Downloads/Shanghai', 'C:/Users/mahdi/Desktop/SASNet_ROOT/ShanghaiTech') for st in train_list_main]
 
     if args.use_gpu:
         os.environ['CUDA_VISIBLE_DEVICES'] = args.device

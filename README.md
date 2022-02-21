@@ -10,6 +10,11 @@ Python 3.8.8 version is used for development.
 ## Datasets
 [ShanghaiTech](link)
 
+* To preprocess ShanghaiTech dataset:
+
+Run make_dateset.py
+
+
 ## To train the code:
 Run train.py
 

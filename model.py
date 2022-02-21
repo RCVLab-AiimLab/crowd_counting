@@ -1,20 +1,13 @@
 import torch
 import torch.nn as nn
-#from .utils import load_state_dict_from_url
 try:
     from torch.hub import load_state_dict_from_url
 except ImportError:
     from torch.utils.model_zoo import load_url as load_state_dict_from_url
 
 import numpy as np 
-import math
 from copy import deepcopy
-import yaml 
-import cv2 
-from itertools import product, starmap
 from torchvision import models
-import torch.nn.functional as F
-import matplotlib.pyplot as plt
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152', 'resnext50_32x4d', 'resnext101_32x8d',
@@ -161,10 +154,6 @@ class ResNet(nn.Module):
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 128, layers[0])
         self.layer2 = self._make_layer(block, 256, layers[1], stride=2, dilate=replace_stride_with_dilation[0])
-        #self.layer3 = self._make_layer(block, 512, layers[2], stride=2, dilate=replace_stride_with_dilation[1])
-        #self.layer4 = self._make_layer(block, 1024, layers[3], stride=2, dilate=replace_stride_with_dilation[2])
-        #self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        #self.fc = nn.Linear(512 * block.expansion, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -211,12 +200,6 @@ class ResNet(nn.Module):
 
         x = self.layer1(x)
         x = self.layer2(x)
-        #x = self.layer3(x)
-        #x = self.layer4(x)
-
-        #x = self.avgpool(x)
-        #x = torch.flatten(x, 1)
-        #x = self.fc(x)
 
         return x
 
@@ -318,8 +301,6 @@ class MSPSNet(nn.Module):
         x_fuse = self.output_layer_3(x_fuse)
         x_fuse = x_fuse.squeeze(1)  # count_fuse
 
-        #if not training:
-        #    x2 = x2.sigmoid()
 
         return x0, x1, x2, x_fuse
 
@@ -383,13 +364,10 @@ class DoubleConv(nn.Module):
             mid_channels = out_channels
         self.double_conv = nn.Sequential(
             nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=d_rate, dilation=d_rate),
-            # nn.BatchNorm2d(mid_channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(mid_channels, mid_channels, kernel_size=3, padding=d_rate, dilation=d_rate),
-            # nn.BatchNorm2d(mid_channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=d_rate, dilation=d_rate),
-            # nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
 
@@ -439,7 +417,6 @@ class ComputeLoss:
         device = next(model.parameters()).device  # get model device
 
         # Define criteria
-        #self.MSELoss = nn.MSELoss(reduction='mean') 
         self.MSELoss = nn.MSELoss(reduction='sum')
         self.BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([1], device=device))
 
@@ -560,4 +537,3 @@ class ComputeLoss:
         indices_2.append((gj, gi))  
 
         return indices_t, indices_0, indices_1, indices_2
-
