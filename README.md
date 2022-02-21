@@ -18,6 +18,11 @@ Run make_dateset.py
 ## To train the code:
 Run train.py
 
+* We also provide trained models:
+[ShanghaiTech_A](https://www.kaggle.com/tthien/shanghaitech)
+[ShanghaiTech_B](https://www.kaggle.com/tthien/shanghaitech)
+
+
 ## to test the code:
 Run eval.py
 
