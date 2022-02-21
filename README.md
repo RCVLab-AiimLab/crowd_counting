@@ -8,7 +8,7 @@ Python 3.8.8 version is used for development.
 
 
 ## Datasets
-[ShanghaiTech](https://drive.google.com/file/d/16dhJn7k4FWVwByRsQAEpl9lwjuV03jVI/view)
+[ShanghaiTech](https://www.kaggle.com/tthien/shanghaitech)
 
 * To preprocess ShanghaiTech dataset:
 
