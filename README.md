@@ -19,7 +19,9 @@ Run make_dateset.py
 Run train.py
 
 * We also provide trained models:
-[ShanghaiTech_A](https://www.kaggle.com/tthien/shanghaitech)
+
+[ShanghaiTech_A](https://queensuca-my.sharepoint.com/:f:/g/personal/hd53_queensu_ca/Ercs-ffjKR5Jj7-AhnzXfQEB10Es-Yiyl5tSkc2bM_6XPw?e=T5LgaK)
+
 [ShanghaiTech_B](https://www.kaggle.com/tthien/shanghaitech)
 
 
