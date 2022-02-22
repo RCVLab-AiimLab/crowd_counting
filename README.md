@@ -1,4 +1,4 @@
-# [Multiscale Crowd Counting and Localization by Multitask Point Supervision](https://arxiv.org)
+# [Multiscale Crowd Counting and Localization by Multitask Point Supervision](https://arxiv.org/abs/2202.09942)
 
 ## Dependencies
 * [PyTorch](https://pytorch.org)
@@ -34,9 +34,15 @@ Run eval.py
 ## Citation
 Please cite our paper if you use code from this repository:
 ```
-@article{....
+@article{zand2022Multiscale,
+  title={Multiscale Crowd Counting and Localization By Multitask Point Supervision
+},
+  author={Zand, Mohsen, Damirchi, Haleh, Farley, Andrew, Molahasani, Mahdiyar, Greenspan, Michael, and Etemad, Ali},
+  journal={arXiv preprint arXiv:2202.09942},
+  year={2022}
 }
 ```
+
 
 ## References
 [CSRNet](https://github.com/leeyeehoo/CSRNet)
