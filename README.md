@@ -35,8 +35,7 @@ Run eval.py
 Please cite our paper if you use code from this repository:
 ```
 @article{zand2022Multiscale,
-  title={Multiscale Crowd Counting and Localization By Multitask Point Supervision
-},
+  title={Multiscale Crowd Counting and Localization By Multitask Point Supervision},
   author={Zand, Mohsen, Damirchi, Haleh, Farley, Andrew, Molahasani, Mahdiyar, Greenspan, Michael, and Etemad, Ali},
   journal={arXiv preprint arXiv:2202.09942},
   year={2022}
