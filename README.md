@@ -14,19 +14,19 @@ We evaluated our method against previous crowd counting methods using MSE, MAE a
 
 
 |              |   ShanghaiTech A  |   ShanghaiTech A  |
-|              |  Counting  | Loc. |  Counting  | Loc. |
-|     Method   | MAE    MSE |  AP  | MAE    MSE |  AP  |
+|              |  Counting    Loc. |  Counting    Loc. |
+|     Method   | MAE    MSE    AP  | MAE    MSE    AP  |
 | -------------| ----------------- | ----------------- |
-| Cross-scene  |181.1  277.7|  -   |32.0   49.8 |  -   |
-| MCNN         |110.2  173.2|  -   |26.4   41.3 |  -   |
-| LC-ResFCN    |  -      -  |  -   |25.89    -  |  -   |
-| LC-PSPNet    |  -      -  |  -   |21.61    -  |  -   |
-| RAZNet       |75.2   133.0| 0.69 |13.5   25.4 | 0.69 |
-| RAZNet+      |71.6   120.1| 0.69 |9.9    15.6 | 0.71 |
-| DD-CNN       |71.9   111.2| 0.65 |  -      -  |  -   |
-| Deep-Stacked |94.0   150.6|  -   |18.7   31.9 |  -   |
-| CSRNet       |68.2   115.0|  -   |10.6   16   |  -   |
-| Ours         |71.4   110.7| 0.71 |9.6    15.0 | 0.75 | 
+| Cross-scene  |181.1  277.7   -   |32.0   49.8    -   |
+| MCNN         |110.2  173.2   -   |26.4   41.3    -   |
+| LC-ResFCN    |  -      -     -   |25.89    -     -   |
+| LC-PSPNet    |  -      -     -   |21.61    -     -   |
+| RAZNet       |75.2   133.0  0.69 |13.5   25.4   0.69 |
+| RAZNet+      |71.6   120.1  0.69 |9.9    15.6   0.71 |
+| DD-CNN       |71.9   111.2  0.65 |  -      -     -   |
+| Deep-Stacked |94.0   150.6   -   |18.7   31.9    -   |
+| CSRNet       |68.2   115.0   -   |10.6   16      -   |
+| Ours         |71.4   110.7  0.71 |9.6    15.0   0.75 | 
 
 
 ### Visualization:
