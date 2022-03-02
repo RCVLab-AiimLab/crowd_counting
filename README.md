@@ -5,13 +5,6 @@ We propose a multitask approach for crowd counting and person localization in a 
 ## Results:
 We evaluated our method against previous crowd counting methods using MSE, MAE and AP measures. The results from the proposed method are presented below:
 
-|              | ShanghaiTech A    |   ShanghaiTech B  |
-|              |  Counting         |  Counting         |
-|     Method   | MAE    MSE        | MAE    MSE        |
-| ------------ | ----------------- | ----------------- |
-| Content Cell | Content Cell      | Content Cell      |
-| Content Cell | Content Cell      | Content Cell      |
-
 
 |              |   ShanghaiTech A  |   ShanghaiTech A  |
 |              |  Counting    Loc. |  Counting    Loc. |
