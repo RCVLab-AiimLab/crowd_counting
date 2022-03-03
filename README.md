@@ -24,9 +24,7 @@ We evaluated our method against previous crowd counting methods using MSE, MAE a
 
 ### Visualization:
 
-Visualized samples of detection and localization. Yel-
-low and red points denote detected and ground truth head lo-
-cations, respectively:
+Visualized samples of detection and localization. Yellow and red points denote detected and ground truth head locations, respectively.
 
 ![](imgs/vis.png)
 
